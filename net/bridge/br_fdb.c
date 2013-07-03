@@ -294,6 +294,10 @@ void br_fdb_delete_by_port(struct net_bridge *br,
 	spin_unlock_bh(&br->hash_lock);
 }
 
+/* 
+ * 网桥设备的地址学习hash表中查找skb的目的Mac地址所对应的dev,如果找到且通过
+ * 其时间戳认定改记录未过期,则返回找到的fdb,否则返回NULL
+ */
 /* No locking or refcounting, assumes caller has rcu_read_lock */
 struct net_bridge_fdb_entry *__br_fdb_get(struct net_bridge *br,
 					  const unsigned char *addr,
@@ -482,6 +486,10 @@ int br_fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
 	return ret;
 }
 
+/*
+ * 更新网桥设备的地址学习hash表中对应于skb的源Mac地址的记录
+ *（更新时间戳及其所指向的net_bridge_port结构） 
+ */
 void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
 		   const unsigned char *addr, u16 vid, bool added_by_user)
 {

@@ -183,11 +183,15 @@
  * such requests may be made at any time.
  */
 struct usb_ctrlrequest {
+    //bit7 就表示了控制传输中DATA transaction 阶段的方向
+    //bit5~6 表示request 的类型，是标准的，class-specific 的还是vendor-specific 的。
+    //bit0~4 表示了这个请求针对的是设备，接口，还是端点
 	__u8 bRequestType;
-	__u8 bRequest;
-	__le16 wValue;
-	__le16 wIndex;
-	__le16 wLength;
+	__u8 bRequest;  //具体是哪个request
+	__le16 wValue;  //是request 的参数，request 不同，wValue 就不同。
+	__le16 wIndex;  //request 的参数，bRequestType 指明request 针对的是设备上
+                    //的某个接口或端点的时候，wIndex 就用来指明是哪个接口或端点
+	__le16 wLength; //控制传输中DATA transaction 阶段的长度
 } __attribute__ ((packed));
 
 /*-------------------------------------------------------------------------*/
@@ -257,20 +261,20 @@ struct usb_descriptor_header {
 /* USB_DT_DEVICE: Device descriptor */
 struct usb_device_descriptor {
 	__u8  bLength;
-	__u8  bDescriptorType;
+	__u8  bDescriptorType;  //  描述符类型的编号
 
-	__le16 bcdUSB;
+	__le16 bcdUSB;  //USB spec 的版本号(如果是usb2.0 0200H)
 	__u8  bDeviceClass;
 	__u8  bDeviceSubClass;
 	__u8  bDeviceProtocol;
-	__u8  bMaxPacketSize0;
+	__u8  bMaxPacketSize0;//端点0 一次可以处理的最大字节数,8(low)/16/32/64(high)
 	__le16 idVendor;
 	__le16 idProduct;
-	__le16 bcdDevice;
-	__u8  iManufacturer;
-	__u8  iProduct;
+	__le16 bcdDevice;   //设备的版本号。
+	__u8  iManufacturer;//厂商，产品和序列号对应的字符串描述符的索引值。
+	__u8  iProduct;     // 描述产品的字符串的索引
 	__u8  iSerialNumber;
-	__u8  bNumConfigurations;
+	__u8  bNumConfigurations;//当前速度模式下支持的配置数量,不是总的配置数目
 } __attribute__ ((packed));
 
 #define USB_DT_DEVICE_SIZE		18
@@ -311,16 +315,21 @@ struct usb_device_descriptor {
  * devices with a USB_DT_DEVICE_QUALIFIER have any OTHER_SPEED_CONFIG
  * descriptors.
  */
-struct usb_config_descriptor {
+struct usb_config_descriptor {  // 多个配置描述符
 	__u8  bLength;
-	__u8  bDescriptorType;
+	__u8  bDescriptorType;//USB_DT_CONFIG/USB_DT_OTHER_SPEED_CONFIG(高速设备操作在低速或全速模式时的配置信息)
 
-	__le16 wTotalLength;
-	__u8  bNumInterfaces;
-	__u8  bConfigurationValue;
-	__u8  iConfiguration;
-	__u8  bmAttributes;
-	__u8  bMaxPower;
+	__le16 wTotalLength;/* 使用GET_DESCRIPTOR 请求从设备里获得配置描述符信息时，
+                         * 返回的数据长度,包括配置描述符、接口描述符、端点描述符，class-或
+                         * vendor-specific 描述符在内的所有描述符算了个总帐*/
+	__u8  bNumInterfaces;//这个配置包含的接口数目。
+	__u8  bConfigurationValue;/* 对于拥有多个配置设备来说,使用SET_CONFIGURATION 
+	                           * 请求来改变正在被使用的 USB 配置,
+	                           * bConfigurationValue 就指明了将要激活哪个配置*/
+	__u8  iConfiguration;   //描述配置信息的字符串描述符的索引值。
+	__u8  bmAttributes; //表征了配置的一些特点,bit 7 必须为1
+	__u8  bMaxPower;    /* 设备正常运转时,从总线那里分得的最大电流值，
+	                     * 以2mA 为单位,如果超过了hub(udev->bus_mA)的最大值,直接拒绝 */
 } __attribute__ ((packed));
 
 #define USB_DT_CONFIG_SIZE		9
@@ -352,9 +361,9 @@ struct usb_interface_descriptor {
 	__u8  bLength;
 	__u8  bDescriptorType;
 
-	__u8  bInterfaceNumber;
-	__u8  bAlternateSetting;
-	__u8  bNumEndpoints;
+	__u8  bInterfaceNumber; // 接口的编号
+	__u8  bAlternateSetting;// 备用的接口描述符编号,提供不同质量的服务参数.
+	__u8  bNumEndpoints;//表示这个intface有多少个endpoint,不包括0号
 	__u8  bInterfaceClass;
 	__u8  bInterfaceSubClass;
 	__u8  bInterfaceProtocol;
@@ -370,10 +379,11 @@ struct usb_endpoint_descriptor {
 	__u8  bLength;
 	__u8  bDescriptorType;
 
-	__u8  bEndpointAddress;
-	__u8  bmAttributes;
-	__le16 wMaxPacketSize;
-	__u8  bInterval;
+	__u8  bEndpointAddress;/* bits 0~3 表示的就是端点号,bit7表示方向,输入还是输出 */
+	__u8  bmAttributes;     /* bit1 和bit0 共同称为Transfer Type,即传输类型， 
+                             * 00 表示控制，01 表示等时，10 表示批量，11 表示中断 */
+	__le16 wMaxPacketSize; //端点一次可以处理的最大字节数,最后一个包可以比这个小
+	__u8  bInterval;    // 主机轮询自己的时间间隔:中断传送时轮询间隔,此域为1-255;批量和控制传送时忽略;同步传送时,为1
 
 	/* NOTE:  these two are _only_ in audio endpoints. */
 	/* use USB_DT_ENDPOINT*_SIZE in bLength, not sizeof. */
@@ -923,13 +933,18 @@ enum usb_device_state {
 	USB_STATE_NOTATTACHED = 0,
 
 	/* chapter 9 and authentication (wireless) device states */
-	USB_STATE_ATTACHED,
+	USB_STATE_ATTACHED,     // 表示设备已经连接到usb 接口上了，是hub 检测到设备时的初始状态。
 	USB_STATE_POWERED,			/* wired */
 	USB_STATE_RECONNECTING,			/* auth */
 	USB_STATE_UNAUTHENTICATED,		/* auth */
-	USB_STATE_DEFAULT,			/* limited function */
-	USB_STATE_ADDRESS,
-	USB_STATE_CONFIGURED,			/* most functions */
+	USB_STATE_DEFAULT,			/* limited function 在Powered 之后，设备必须在
+	                             * 收到一个复位（reset）信号并成功复位后，
+                                 * 才能使用缺省地址回应主机发过来的设备和配置描述符的请求。*/
+	USB_STATE_ADDRESS,      // 表示主机分配了一个唯一的地址给设备，此时设备可以使用缺省管道响应主机的请求
+	USB_STATE_CONFIGURED,			/* most functions 表示设备已经被主机配置过了，
+	                                 * 也就是协议里说的处理了一个带有非0值的
+	                                 * SetConfiguration()请求，此时主机可以
+	                                 * 使用设备提供的所有功能。*/
 
 	USB_STATE_SUSPENDED
 

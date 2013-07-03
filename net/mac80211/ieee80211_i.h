@@ -1278,8 +1278,8 @@ struct ieee802_11_elems {
 	/* pointers to IEs */
 	const u8 *ssid;
 	const u8 *supp_rates;
-	const u8 *ds_params;
-	const struct ieee80211_tim_ie *tim;
+	const u8 *ds_params;    // direct sequence pararmeter set 
+	const struct ieee80211_tim_ie *tim; // Traffic Indication Map
 	const u8 *challenge;
 	const u8 *rsn;
 	const u8 *erp_info;

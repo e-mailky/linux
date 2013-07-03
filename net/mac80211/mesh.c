@@ -1083,7 +1083,7 @@ static void ieee80211_mesh_rx_bcn_presp(struct ieee80211_sub_if_data *sdata,
 		mesh_neighbour_update(sdata, mgmt->sa, &elems);
 
 	if (ifmsh->sync_ops)
-		ifmsh->sync_ops->rx_bcn_presp(sdata,
+		ifmsh->sync_ops->rx_bcn_presp(sdata,//mesh_sync_offset_rx_bcn_presp
 			stype, mgmt, &elems, rx_status);
 
 	if (!ifmsh->chsw_init)

@@ -13,6 +13,15 @@
  *
  *  Note:  there is a StrongARM bug in the STMIA rn, {regs}^ instruction
  *  that causes it to save wrong values...  Be aware!
+ *  中断的入口vector_irq,此时cpu处于irq模式,vecor_irq首先把R0,LR(中断前的CPSR)保存
+ *  到irq模式的栈中,然后根据进入中断前的处理器模式跳转到不同入口(__irq_usr/__irq_svc),
+ *  跳转后处理器模式变为svc.
+ *  __irq_usr/__irq_svc运行流程大致相同:都是先在svc模式栈(即linux的内核栈)中生成
+ *  include/asm-arm/ptrace.h中的struct pt_regs定义的堆帧结构,把被中断的任务的preempt_count+1
+ *  然后通过宏get_irqnr_and_base读取中断号和中断状态寄存器,调用asm_do_IRQ().
+ *  只要读到的中断状态寄存器非0(表示有中断发生),就一直循环调用asm_do_IRQ(),对于
+ *  用户态调用ret_to_usr返回用户态,对于svc模式,如果当前进程需要调度,内核又允许
+ *  抢占,则调用svc_preempt()切换任务,
  */
 
 #include <asm/assembler.h>
@@ -146,6 +155,7 @@ ENDPROC(__und_invalid)
 #define SPFIX(code...)
 #endif
 
+	/* 在内核栈中产生include/asm-arm/ptrace.h中pt_regs定义的栈帧结构 */
 	.macro	svc_entry, stack_hole=0
  UNWIND(.fnstart		)
  UNWIND(.save {r0 - pc}		)
@@ -388,7 +398,8 @@ __irq_usr:
 	usr_entry
 	kuser_cmpxchg_check
 	irq_handler
-	get_thread_info tsk
+	get_thread_info tsk  /* 把被中断的任务的preempt_count 加 1 */
+	/* 返回到user模式 */
 	mov	why, #0
 	b	ret_to_user_from_irq
  UNWIND(.fnend		)
@@ -969,8 +980,8 @@ vector_\name:
 	.endif
 
 	@
-	@ Save r0, lr_<exception> (parent PC) and spsr_<exception>
-	@ (parent CPSR)
+	@ Save r0, lr_<exception> (parent PC中断前的PC,断点) and spsr_<exception>
+	@ (parent CPSR) 中断前的CRSR)到irq模式的栈中
 	@
 	stmia	sp, {r0, lr}		@ save r0, lr
 	mrs	lr, spsr
@@ -983,9 +994,9 @@ vector_\name:
 	eor	r0, r0, #(\mode ^ SVC_MODE | PSR_ISETSTATE)
 	msr	spsr_cxsf, r0
 
-	@
+	@ 根据中断前的模式跳转到相应的处理程序(irq_user/irq_svc)
 	@ the branch table must immediately follow this code
-	@
+	@ lr是中断刚开始时的SPSR,即被中断代码的CPSR,其低4bit表示中断前的模式
 	and	lr, lr, #0x0f
  THUMB(	adr	r0, 1f			)
  THUMB(	ldr	lr, [r0, lr, lsl #2]	)
@@ -1139,6 +1150,7 @@ __vectors_start:
 	W(b)	vector_addrexcptn
 	W(b)	vector_irq
 	W(b)	vector_fiq
+
 
 	.data
 

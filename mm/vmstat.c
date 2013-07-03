@@ -77,7 +77,7 @@ void vm_events_fold_cpu(int cpu)
 /*
  * Manage combined zone based / global counters
  *
- * vm_stat contains the global counters
+ * vm_stat contains the global counters 统计各区的大小
  */
 atomic_long_t vm_stat[NR_VM_ZONE_STAT_ITEMS] __cacheline_aligned_in_smp;
 EXPORT_SYMBOL(vm_stat);

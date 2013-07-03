@@ -29,6 +29,10 @@ EXPORT_SYMBOL(kmap);
 
 void kunmap(struct page *page)
 {
+    /**
+     * 不可能在中断中调用kmap，因此也不可能在中断中解除映射。
+     * 这里用BUG_ON来确保检测是否有这种错误情况出现 
+     */
 	BUG_ON(in_interrupt());
 	if (!PageHighMem(page))
 		return;
@@ -36,6 +40,7 @@ void kunmap(struct page *page)
 }
 EXPORT_SYMBOL(kunmap);
 
+/* 建立内核临时映射 */
 void *kmap_atomic(struct page *page)
 {
 	unsigned int idx;
@@ -43,9 +48,14 @@ void *kmap_atomic(struct page *page)
 	void *kmap;
 	int type;
 
+    /**
+     * 这里其实是禁止抢占: 禁止抢占的目的是为了避免线程飘移到其他核，
+     * 因为后面要使用smp_processor_id确定线程的所在CPU
+     * 不同CPU占用的kmap虚拟地址空间不一样，读者可以认真思考一下为什么需要这样做。
+     */
 	pagefault_disable();
-	if (!PageHighMem(page))
-		return page_address(page);
+	if (!PageHighMem(page))/* 如果页面不是高端内存 */
+		return page_address(page);/* 直接返回其线性地址即可，没有必要进行kmap映射 */
 
 #ifdef CONFIG_DEBUG_HIGHMEM
 	/*
@@ -56,14 +66,22 @@ void *kmap_atomic(struct page *page)
 		kmap = NULL;
 	else
 #endif
+        /**
+         * 在获得锁的情况下，获取页面的kmap地址，这里主要是防止不同任务、
+         * 不同CPU上对同一个页面进行多次映射 
+         */
 		kmap = kmap_high_get(page);
+    /**
+     * 如果其他地方已经映射了该页，则在kmap_high_get中已经增加了映射计数，
+     * 这里直接返回其虚拟地址即可 */
 	if (kmap)
 		return kmap;
 
-	type = kmap_atomic_idx_push();
+	type = kmap_atomic_idx_push(); /* 递增本CPU上可用的kmap虚拟地址索引号 */
 
+    /* 每个CPU上的kmap虚拟地址空间不同，这里是计算本CPU可用的地址索引号 */
 	idx = type + KM_TYPE_NR * smp_processor_id();
-	vaddr = __fix_to_virt(FIX_KMAP_BEGIN + idx);
+	vaddr = __fix_to_virt(FIX_KMAP_BEGIN + idx); /* 将kmap地址索引号转换为可用的虚拟地址 */
 #ifdef CONFIG_DEBUG_HIGHMEM
 	/*
 	 * With debugging enabled, kunmap_atomic forces that entry to 0.
@@ -75,20 +93,28 @@ void *kmap_atomic(struct page *page)
 	 * When debugging is off, kunmap_atomic leaves the previous mapping
 	 * in place, so the contained TLB flush ensures the TLB is updated
 	 * with the new mapping.
-	 */
+	 */ /* 为虚拟地址建立pte页表项 */
 	set_top_pte(vaddr, mk_pte(page, kmap_prot));
 
 	return (void *)vaddr;
 }
 EXPORT_SYMBOL(kmap_atomic);
 
+/* 撤销内核临时映射 */
 void __kunmap_atomic(void *kvaddr)
 {
+    /* 将虚拟地址对齐到页边界 */
 	unsigned long vaddr = (unsigned long) kvaddr & PAGE_MASK;
 	int idx, type;
 
+    /**
+     * FIXADDR_START是kmap_atomic映射的最小的虚拟地址，这里验证一下虚拟地址，
+     * 确保它确实是由kmap_atomic而不是kmap映射出来的 
+     */
 	if (kvaddr >= (void *)FIXADDR_START) {
+        /* 获得上一次调用kmap_atomic占用的虚拟地址空间索引号 */
 		type = kmap_atomic_idx();
+        /* 计算该索引号在整个kmap虚拟地址空间中的索引 */
 		idx = type + KM_TYPE_NR * smp_processor_id();
 
 		if (cache_is_vivt())
@@ -99,12 +125,21 @@ void __kunmap_atomic(void *kvaddr)
 #else
 		(void) idx;  /* to kill a warning */
 #endif
+         /**
+          * 其实这里什么也没有做，仅仅是递减了本CPU上的虚拟地址空间索引号，
+          * 也就是说下次调用kmap_atomic时，占用本次释放的虚拟地址 */
 		kmap_atomic_idx_pop();
+    /* 判断虚拟地址空间是否是kmap占用的空间 */
 	} else if (vaddr >= PKMAP_ADDR(0) && vaddr < PKMAP_ADDR(LAST_PKMAP)) {
 		/* this address was obtained through kmap_high_get() */
+        /* 如果是kmap的地址空间，则调用者应当调用kunmap，这里实现一个容错处理*/
 		kunmap_high(pte_page(pkmap_page_table[PKMAP_NR(vaddr)]));
 	}
-	pagefault_enable();
+    /**
+     * 打开抢占，在kmap_atomic函数中关闭了抢占，这里打开。 
+     * 换句话说，在kmap_atomic和kunmap_atomic之间，都是关抢占的。
+     */	
+    pagefault_enable();
 }
 EXPORT_SYMBOL(__kunmap_atomic);
 

@@ -135,7 +135,7 @@ handle_irq_event_percpu(struct irq_desc *desc, struct irqaction *action)
 	irqreturn_t retval = IRQ_NONE;
 	unsigned int flags = 0, irq = desc->irq_data.irq;
 
-	do {
+	do {//循环调用每个action
 		irqreturn_t res;
 
 		trace_irq_handler_entry(irq, action);

@@ -138,8 +138,17 @@ static inline void __raw_spin_lock_bh(raw_spinlock_t *lock)
 
 static inline void __raw_spin_lock(raw_spinlock_t *lock)
 {
-	preempt_disable();
+    /**
+     * 这里禁止抢占有三个目的:
+     *  1、禁止切换到其他进程，以避免在获取到自旋锁后，
+     *     切换到另一个进程上下文申请同样的自旋锁以形成死锁。
+     *  2、禁止当前任务在获得锁后飘移到其他核上。
+     *  3、禁止编译优化。这是锁原语所需要的。
+     */	
+    preempt_disable();
+    //  用于调试目的，一般未配置此调试选项。相当于空函数。
 	spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+    // 当调试时，调用do_raw_spin_trylock，否则调用do_raw_spin_lock
 	LOCK_CONTENDED(lock, do_raw_spin_trylock, do_raw_spin_lock);
 }
 

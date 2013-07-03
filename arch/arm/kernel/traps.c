@@ -869,6 +869,11 @@ static inline void __init kuser_init(void *vectors)
 }
 #endif
 
+/*
+ * 把entry-armv.S中的异常向量表和异常处理程序的stub重定位,
+ * 异常向量表==>0xfff0000 异常处理程序的stub==>0xfff0200,
+ * 然后调用modify_domain()修改异常向量表页面,使得用户态无法访问该页面
+ */
 void __init early_trap_init(void *vectors_base)
 {
 #ifndef CONFIG_CPU_V7M
@@ -898,6 +903,7 @@ void __init early_trap_init(void *vectors_base)
 
 	kuser_init(vectors_base);
 
+    /* flush cache,修改异常向量表占据的页面访问权限 */
 	flush_icache_range(vectors, vectors + PAGE_SIZE * 2);
 	modify_domain(DOMAIN_USER, DOMAIN_CLIENT);
 #else /* ifndef CONFIG_CPU_V7M */

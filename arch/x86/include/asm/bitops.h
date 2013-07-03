@@ -66,6 +66,7 @@
  *
  * Note that @nr may be almost arbitrarily large; this function is not
  * restricted to acting on a single-word quantity.
+ * 不可恢复对给定地址addr的第nr bit 进行置位；同时值得注意一个变量是nr，它可被定义为一个巨数，而不应该限制在一个single-word的数量级上
  */
 static __always_inline void
 set_bit(long nr, volatile unsigned long *addr)
@@ -89,6 +90,7 @@ set_bit(long nr, volatile unsigned long *addr)
  * Unlike set_bit(), this function is non-atomic and may be reordered.
  * If it's called on the same region of memory simultaneously, the effect
  * may be that only one operation succeeds.
+ * 成功被调用的条件是调用函数和被调函数处于同一个内存段。 
  */
 static inline void __set_bit(long nr, volatile unsigned long *addr)
 {

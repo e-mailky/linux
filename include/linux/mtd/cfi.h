@@ -129,7 +129,7 @@ static inline int cfi_interleave_supported(int i)
  * where individually noted.
  */
 
-/* Basic Query Structure */
+/* Basic Query Structure 描述Flash芯片的信息 */
 struct cfi_ident {
 	uint8_t  qry[3];
 	uint16_t P_ID;
@@ -287,7 +287,7 @@ struct cfi_private {
 	int addr_unlock2;
 	struct mtd_info *(*cmdset_setup)(struct map_info *);
 	struct cfi_ident *cfiq; /* For now only one. We insist that all devs
-				  must be of the same type. */
+				  must be of the same type. 描述Flash芯片的信息*/
 	int mfr, id;
 	int numchips;
 	map_word sector_erase_cmd;

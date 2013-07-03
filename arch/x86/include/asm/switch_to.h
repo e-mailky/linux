@@ -28,6 +28,11 @@ void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
  * Saving eflags is important. It switches not only IOPL between tasks,
  * it also protects other tasks from NT leaking through sysenter etc.
  */
+/* 第51行之所以將標記1放入prev->thread.ip中，是為了讓舊行程在下次被喚醒時，
+ * 可以回到標記 1 的位置。當下次舊行程被喚醒後，就會從標記 1 的位址開始執行，
+ * 舊行程可以利用第56-57行的popl %%ebp; popfl 兩個指令，恢復其 ebp (框架指標) 與旗標暫存器，
+ * 然後再度透過 switch_to()，切換回舊行程 (只不過這次舊行程變成了函數switch_to(prev, next, last)
+ * 中的 next 角色，不再是『舊行程』了。*/
 #define switch_to(prev, next, last)					\
 do {									\
 	/*								\
@@ -41,10 +46,10 @@ do {									\
 									\
 	asm volatile("pushfl\n\t"		/* save    flags */	\
 		     "pushl %%ebp\n\t"		/* save    EBP   */	\
-		     "movl %%esp,%[prev_sp]\n\t"	/* save    ESP   */ \
-		     "movl %[next_sp],%%esp\n\t"	/* restore ESP   */ \
-		     "movl $1f,%[prev_ip]\n\t"	/* save    EIP   */	\
-		     "pushl %[next_ip]\n\t"	/* restore EIP   */	\
+		     "movl %%esp,%[prev_sp]\n\t"	/* save    ESP ==>prev(旧进程)->thread.sp */ \
+		     "movl %[next_sp],%%esp\n\t"	/* restore ESP  next(新进程)->thread.sp==>CPU ESP */ \
+		     "movl $1f,%[prev_ip]\n\t"	/* save    EIP  把標記 1 的位址放入舊行程的 prev->thread.ip */	\
+		     "pushl %[next_ip]\n\t"	/* restore EIP  將新行程的程式計數器 next->thread.ip 推入堆疊中 */	\
 		     __switch_canary					\
 		     "jmp __switch_to\n"	/* regparm call  */	\
 		     "1:\t"						\

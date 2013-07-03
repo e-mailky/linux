@@ -81,7 +81,7 @@ struct usb_hcd {
 	/*
 	 * housekeeping
 	 */
-	struct usb_bus		self;		/* hcd is-a bus */
+	struct usb_bus		self;		/* hcd is-a bus  所代表的USB Bus */
 	struct kref		kref;		/* reference counter */
 
 	const char		*product_desc;	/* product/vendor string */
@@ -100,7 +100,7 @@ struct usb_hcd {
 	/*
 	 * hardware info/state
 	 */
-	const struct hc_driver	*driver;	/* hw-specific hooks */
+	const struct hc_driver	*driver;	/* hw-specific hooks 硬件特定的钩子函数,操作HC硬件 */
 
 	/*
 	 * OTG and some Host controllers need software interaction with phys;
@@ -138,7 +138,7 @@ struct usb_hcd {
 
 	/* The next flag is a stopgap, to be removed when all the HCDs
 	 * support the new root-hub polling mechanism. */
-	unsigned		uses_new_polling:1;
+	unsigned		uses_new_polling:1;     // 支持新的根hub轮询？
 	unsigned		wireless:1;	/* Wireless USB HCD */
 	unsigned		authorized_default:1;
 	unsigned		has_tt:1;	/* Integrated TT in root hub */
@@ -193,7 +193,7 @@ struct usb_hcd {
 	 */
 
 	/* The HC driver's private data is stored at the end of
-	 * this structure.
+	 * this structure. 指向ohci_hcd/uhci_hcd/ehci_hcd/xhci_hcd
 	 */
 	unsigned long hcd_priv[0]
 			__attribute__ ((aligned(sizeof(s64))));
@@ -244,13 +244,13 @@ struct hc_driver {
 	/* NOTE:  these suspend/resume calls relate to the HC as
 	 * a whole, not just the root hub; they're for PCI bus glue.
 	 */
-	/* called after suspending the hub, before entering D3 etc */
+	/* called after suspending the hub, before entering D3 etc 挂起Hub,进入D3(etc)前调用  */
 	int	(*pci_suspend)(struct usb_hcd *hcd, bool do_wakeup);
 
-	/* called after entering D0 (etc), before resuming the hub */
+	/* called after entering D0 (etc), before resuming the hub  进入D0(etc)后,恢复Hub */
 	int	(*pci_resume)(struct usb_hcd *hcd, bool hibernated);
 
-	/* cleanly make HCD stop writing memory and doing I/O */
+	/* cleanly make HCD stop writing memory and doing I/O; HCD停止MM和IO */
 	void	(*stop) (struct usb_hcd *hcd);
 
 	/* shutdown HCD */

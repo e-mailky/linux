@@ -59,13 +59,13 @@ enum kobject_action {
 };
 
 struct kobject {
-	const char		*name;
-	struct list_head	entry;
-	struct kobject		*parent;
-	struct kset		*kset;
-	struct kobj_type	*ktype;
-	struct kernfs_node	*sd;
-	struct kref		kref;
+	const char		*name;      //指向设备名称的指针
+	struct list_head	entry;  //挂接到所在kset中去的单元
+	struct kobject		*parent;//指向父对象的指针
+	struct kset		*kset;      //所属kset的指针
+	struct kobj_type	*ktype; //指向其对象类型描述符的指针
+	struct kernfs_node	*sd;    //sysfs文件系统中与该对象对应的文件节点路径指针
+	struct kref		kref;       //对象引用计数
 #ifdef CONFIG_DEBUG_KOBJECT_RELEASE
 	struct delayed_work	release;
 #endif
@@ -126,8 +126,13 @@ struct kobj_uevent_env {
 };
 
 struct kset_uevent_ops {
+    //决定是否产生事件，如果返回0，将不产生事件
 	int (* const filter)(struct kset *kset, struct kobject *kobj);
+    //向用户空间传递一个合适的字符串
 	const char *(* const name)(struct kset *kset, struct kobject *kobj);
+    /* 通过环境变量传递任何热插拔脚本需要的信息，他会在(udev或mdev)调用之前，
+     * 提供添加环境变量的机会
+     */
 	int (* const uevent)(struct kset *kset, struct kobject *kobj,
 		      struct kobj_uevent_env *env);
 };
@@ -160,12 +165,16 @@ struct sock;
  * called whenever a kobject has something happen to it so that the kset
  * can add new environment variables, or filter out the uevents if so
  * desired.
+ * kset的主要功能是包容；我们可以认为他他是kobject的顶层容器。实际上，在每个
+ * kset对象的内部，包含了自己的kobject，并且可以用多种处理kobject的方法处理kset。
+ * 如果说kobject是基类的话，那么kset就是派送类。kobject通过kset组织成层次化的结构，
+ * kset是相同类型的组合。通俗的讲，kobject建立一级的子目录，kset可以为kobject建立多级的层次性的父目录
  */
 struct kset {
-	struct list_head list;
-	spinlock_t list_lock;
-	struct kobject kobj;
-	const struct kset_uevent_ops *uevent_ops;
+	struct list_head list;  //用于连接该kset中所有kobject的链表头
+	spinlock_t list_lock;   //
+	struct kobject kobj;    //嵌入的kobject
+	const struct kset_uevent_ops *uevent_ops;//指向热插拔操作表的指针
 };
 
 extern void kset_init(struct kset *kset);

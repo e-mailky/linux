@@ -143,6 +143,10 @@
 
 static DEFINE_SPINLOCK(ptype_lock);
 static DEFINE_SPINLOCK(offload_lock);
+/*
+ * 各种网络层的协议在其初始化时都会在这个hash表中注册一个
+ * 类型为packet_type的表项（以协议类型为key）
+ */
 struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
 struct list_head ptype_all __read_mostly;	/* Taps */
 static struct list_head offload_base __read_mostly;
@@ -2336,6 +2340,11 @@ struct sk_buff *skb_mac_gso_segment(struct sk_buff *skb,
 
 	__skb_pull(skb, vlan_depth);
 
+    /*
+     * 在这个hash表中遍历所有type与skb->protocol匹配的packet_type结构
+     *（packet_type结构的dev可用于限定skb->dev，NULL表示不限），然后调用其func回调函数。
+     *（可见，一个报文有可能被多种协议所处理。）至此报文被提交到了网络层
+     */
 	rcu_read_lock();
 	list_for_each_entry_rcu(ptype, &offload_base, list) {
 		if (ptype->type == type && ptype->callbacks.gso_segment) {
@@ -2726,7 +2735,7 @@ static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 				spin_unlock(&q->busylock);
 				contended = false;
 			}
-			__qdisc_run(q);
+			__qdisc_run(q);// 触发软中断
 		} else
 			qdisc_run_end(q);
 
@@ -2826,14 +2835,14 @@ static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
 
 	skb_update_prio(skb);
 
-	txq = netdev_pick_tx(dev, skb, accel_priv);
+	txq = netdev_pick_tx(dev, skb, accel_priv);// 选择发送队列
 	q = rcu_dereference_bh(txq->qdisc);
 
 #ifdef CONFIG_NET_CLS_ACT
 	skb->tc_verd = SET_TC_AT(skb->tc_verd, AT_EGRESS);
 #endif
 	trace_net_dev_queue(skb);
-	if (q->enqueue) {
+	if (q->enqueue) {// 如果有enqueue则说明进行流控，否则直接发送
 		rc = __dev_xmit_skb(skb, q, dev, txq);
 		goto out;
 	}
@@ -3201,8 +3210,17 @@ static int enqueue_to_backlog(struct sk_buff *skb, int cpu,
 	local_irq_save(flags);
 
 	rps_lock(sd);
+	// 如果设备已陷入拥塞，则收到的报文可能直接被丢弃。
 	qlen = skb_queue_len(&sd->input_pkt_queue);
 	if (qlen <= netdev_max_backlog && !skb_flow_limit(skb, qlen)) {
+        /*
+         * 新收到的skb加到这个队列中，在加到队列之前，要确保对这个队列的接收处理
+         * 已启动，如果当前队列为空，则要先调用netif_rx_schedule启动队列的处理，
+         * (先blacklog_dev设备加到napi的poll_list队列)再把skb加到队列中
+         * 如果sd queue的qlen为0，那么可能queue->backlog已经从当前cpu sd的poll_list移除，
+         * 因此需要调用napi_schedule(&queue->backlog)重新将queue加入到相应的poll_list上。
+         * 然后再__skb_queue_tail将skb入队列。
+         */
 		if (skb_queue_len(&sd->input_pkt_queue)) {
 enqueue:
 			__skb_queue_tail(&sd->input_pkt_queue, skb);
@@ -3312,6 +3330,7 @@ static void net_tx_action(struct softirq_action *h)
 {
 	struct softnet_data *sd = &__get_cpu_var(softnet_data);
 
+    /* 从softdate_net的completion_queue队列中取出每一个skb，将其释放 */
 	if (sd->completion_queue) {
 		struct sk_buff *clist;
 
@@ -3333,6 +3352,7 @@ static void net_tx_action(struct softirq_action *h)
 		}
 	}
 
+    /* 对于softdate_net的output_queue队列中的dev，调用qdisc_run继续尝试发送其qdisc队列中的报文 */
 	if (sd->output_queue) {
 		struct Qdisc *head;
 
@@ -3592,7 +3612,7 @@ ncls:
 			goto unlock;
 	}
 
-	rx_handler = rcu_dereference(skb->dev->rx_handler);
+	rx_handler = rcu_dereference(skb->dev->rx_handler);//br_handle_frame
 	if (rx_handler) {
 		if (pt_prev) {
 			ret = deliver_skb(skb, pt_prev, orig_dev);
@@ -4123,6 +4143,7 @@ EXPORT_SYMBOL(napi_gro_frags);
 static void net_rps_action_and_irq_enable(struct softnet_data *sd)
 {
 #ifdef CONFIG_RPS
+    /*专属队列rps_ipi_list 上面已经有了buffer要处理*/  
 	struct softnet_data *remsd = sd->rps_ipi_list;
 
 	if (remsd) {
@@ -4134,8 +4155,14 @@ static void net_rps_action_and_irq_enable(struct softnet_data *sd)
 		while (remsd) {
 			struct softnet_data *next = remsd->rps_ipi_next;
 
-			if (cpu_online(remsd->cpu))
-				__smp_call_function_single(remsd->cpu,
+			if (cpu_online(remsd->cpu)) /*还记得我们在net_dev_init中存过吗*/  
+                /*记得csd把 就是那个struct softnet_data中的 
+                 *struct call_single_data    csd ____cacheline_aligned_in_smp; 
+                 *<在SMP架构中用于结构体对齐>  
+                 */    
+                /*当你的函数希望指定CPU去运行，就需要用这个函数 
+                 *写下去就要涉及整个SMP.c 了，只要知道这里用指定的负载CPU执行了*rps_trigger_softirq;*/ 
+                __smp_call_function_single(remsd->cpu,
 							   &remsd->csd, 0);
 			remsd = next;
 		}
@@ -4146,13 +4173,14 @@ static void net_rps_action_and_irq_enable(struct softnet_data *sd)
 
 static int process_backlog(struct napi_struct *napi, int quota)
 {
-	int work = 0;
+	int work = 0; /*根据struct napi_struct 找到 per CPU-V struct softnet_data*/  
 	struct softnet_data *sd = container_of(napi, struct softnet_data, backlog);
 
 #ifdef CONFIG_RPS
 	/* Check if we have pending ipi, its better to send them now,
 	 * not waiting net_rx_action() end.
 	 */
+     /*先看看是不是rps_ipi_list上面已经有东西了，如果有就赶紧处理掉*/  
 	if (sd->rps_ipi_list) {
 		local_irq_disable();
 		net_rps_action_and_irq_enable(sd);
@@ -4160,34 +4188,39 @@ static int process_backlog(struct napi_struct *napi, int quota)
 #endif
 	napi->weight = weight_p;
 	local_irq_disable();
-	while (work < quota) {
+	while (work < quota) { /*当前的quota 还有没到上限*/  
 		struct sk_buff *skb;
 		unsigned int qlen;
 
+        /*挨个的出队列接受L2->L3处理*/
 		while ((skb = __skb_dequeue(&sd->process_queue))) {
 			local_irq_enable();
 			__netif_receive_skb(skb);
 			local_irq_disable();
-			input_queue_head_incr(sd);
-			if (++work >= quota) {
+			input_queue_head_incr(sd); /*该CPU struct napi_struct 中处理计数增加，用于CPU负载计算*/
+			if (++work >= quota) {// 一个是配额到或时间到，直接返回
 				local_irq_enable();
 				return work;
 			}
 		}
 
-		rps_lock(sd);
+        // 是处理完input_pkt_queue队列中的所有skb，此时需要将backlog_dev从poll_list中删除。
+		rps_lock(sd); /*把该CPU 的softnet_data ->input_pkt_queue 保护起来 */
+        /*处理完之后 就直接把process_queue队列链接到 input_pkt_queue上去  等待后面的机会处理*/
 		qlen = skb_queue_len(&sd->input_pkt_queue);
 		if (qlen)
 			skb_queue_splice_tail_init(&sd->input_pkt_queue,
 						   &sd->process_queue);
 
-		if (qlen < quota - work) {
+		if (qlen < quota - work) {/*如果活全部干完了*/  
 			/*
 			 * Inline a custom version of __napi_complete().
 			 * only current cpu owns and manipulates this napi,
 			 * and NAPI_STATE_SCHED is the only possible flag set on backlog.
 			 * we can use a plain write instead of clear_bit(),
 			 * and we dont need an smp_mb() memory barrier.
+             * 因为只有当前的cpu 会操作这个napi结构, 所以取消NAPI_STATE_SCHED 
+             * 标志, 删除napi poll_list队列都是安全的 也不需要 smp_mb() 
 			 */
 			list_del(&napi->poll_list);
 			napi->state = 0;
@@ -4198,7 +4231,7 @@ static int process_backlog(struct napi_struct *napi, int quota)
 	}
 	local_irq_enable();
 
-	return work;
+	return work;/*返回用掉了的work数*/  
 }
 
 /**
@@ -4348,9 +4381,11 @@ static void net_rx_action(struct softirq_action *h)
 		 * Allow this to run for 2 jiffies since which will allow
 		 * an average latency of 1.5/HZ.
 		 */
+        /*当前可用的配额如果用完了，就直接去增加需要的time_squeeze*/ 
 		if (unlikely(budget <= 0 || time_after_eq(jiffies, time_limit)))
 			goto softnet_break;
 
+        /*虽然打开了中断，但是他只会在 poll_list队尾加， 而poll只在队首处理<又一个避免锁的方法>*/
 		local_irq_enable();
 
 		/* Even though interrupts have been re-enabled, this
@@ -4358,9 +4393,10 @@ static void net_rx_action(struct softirq_action *h)
 		 * entries to the tail of this list, and only ->poll()
 		 * calls can remove this head entry from the list.
 		 */
+        /*得到 softnet_data中挂着的struct napi_struc*/  
 		n = list_first_entry(&sd->poll_list, struct napi_struct, poll_list);
 
-		have = netpoll_poll_lock(n);
+		have = netpoll_poll_lock(n);/*锁定该 struct napi_struc ，并且记录当前调度的CPU*/  
 
 		weight = n->weight;
 
@@ -4370,6 +4406,8 @@ static void net_rx_action(struct softirq_action *h)
 		 * actually make the ->poll() call.  Therefore we avoid
 		 * accidentally calling ->poll() when NAPI is not scheduled.
 		 */
+        /*检查 NAPI_STATE_SCHED位 ，避免在挂接，移除链表时候的竞争，有点
+         * while(flag) pthread_con_wait; 的味道*/
 		work = 0;
 		if (test_bit(NAPI_STATE_SCHED, &n->state)) {
 			work = n->poll(n, weight);
@@ -4378,7 +4416,7 @@ static void net_rx_action(struct softirq_action *h)
 
 		WARN_ON_ONCE(work > weight);
 
-		budget -= work;
+		budget -= work;/*消耗一个budget*/
 
 		local_irq_disable();
 
@@ -4387,12 +4425,12 @@ static void net_rx_action(struct softirq_action *h)
 		 * still "owns" the NAPI instance and therefore can
 		 * move the instance around on the list at-will.
 		 */
-		if (unlikely(work == weight)) {
-			if (unlikely(napi_disable_pending(n))) {
+		if (unlikely(work == weight)) {/*如果队列中包和能处理的包 数目一样, 意味着要消耗光整个weight*/
+			if (unlikely(napi_disable_pending(n))) {/*如果设置了NAPI_STATE_DISABLE */
 				local_irq_enable();
 				napi_complete(n);
 				local_irq_disable();
-			} else {
+			} else { /*还有活干 就先把napi poll_list 移到 poll_list末尾*/
 				if (n->gro_list) {
 					/* flush too old packets
 					 * If HZ < 1000, flush all packets.
@@ -4407,7 +4445,7 @@ static void net_rx_action(struct softirq_action *h)
 
 		netpoll_poll_unlock(have);
 	}
-out:
+out:  /*这个函数末尾的时候看一下 ，记住是开启RPS 后生效*/  
 	net_rps_action_and_irq_enable(sd);
 
 #ifdef CONFIG_NET_DMA
@@ -4415,13 +4453,21 @@ out:
 	 * There may not be any more sk_buffs coming right now, so push
 	 * any pending DMA copies to hardware
 	 */
-	dma_issue_pending_all();
+    /*看一下这个就行了   
+    *tcp_dma_copybreak - INTEGER 
+    *Lower limit, in bytes, of the size of socket reads that will be 
+    *offloaded to a DMA copy engine, if one is present in the system 
+    *and CONFIG_NET_DMA is enabled. 
+    *Default: 4096*/  
+    dma_issue_pending_all();
 #endif
 
 	return;
 
 softnet_break:
 	sd->time_squeeze++;
+    /*
+     * 当处理时间持续超过1个时钟嘀嗒时，它会再触发一个中断NET_RX_SOFTIRQ，并退出 */
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 	goto out;
 }

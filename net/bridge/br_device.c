@@ -76,8 +76,9 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 		else
 			br_flood_deliver(br, skb, false);
 	} else if ((dst = __br_fdb_get(br, dest, vid)) != NULL)
+        /* 调用br_deliver将报文发送给这个dev */
 		br_deliver(dst->dst, skb);
-	else
+	else /* 如果找不到则调用br_flood_deliver进行发送 */
 		br_flood_deliver(br, skb, true);
 
 out:

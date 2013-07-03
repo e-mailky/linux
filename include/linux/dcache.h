@@ -111,27 +111,50 @@ struct dentry {
 	seqcount_t d_seq;		/* per dentry seqlock */
 	struct hlist_bl_node d_hash;	/* lookup hash list */
 	struct dentry *d_parent;	/* parent directory */
+    /*
+     * 该域包含了这个入口的名字，以及它的哈希值。它的子域name有可能会指向
+     * 该dentry的d_iname域（如果名字小于等于16个字符），否则的话，
+     * 它将指向一个单独分配出来的字符串
+     */
 	struct qstr d_name;
+    /* 它简单地指向与该名字联系的索引节点。这个域可以是NULL，它标明这是一个负入口（negative entry），暗示着该名字并不存在 */
 	struct inode *d_inode;		/* Where the name belongs to - NULL is
 					 * negative */
+    /* 它存储了文件名的前15个字符，目的是为了方便引用。如果名字适合，d_name.name将指向这里 */
 	unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */
 
 	/* Ref lookup also touches following */
 	struct lockref d_lockref;	/* per-dentry lock and refcount */
 	const struct dentry_operations *d_op;
+    /* 指向该dentry对应文件所在的文件系统的超级块。使用d_inode->i_sb有相同的效果 */
 	struct super_block *d_sb;	/* The root of the dentry tree */
 	unsigned long d_time;		/* used by d_revalidate */
 	void *d_fsdata;			/* fs-specific data */
 
+    /*
+     * 它提供了一个双向链表，链接高速缓存中未被引用的叶节点。
+     * 这个链表的头是全局变量dentry_unused，按照最近最少使用的顺序存储 
+     */
 	struct list_head d_lru;		/* LRU list */
 	/*
 	 * d_child and d_rcu can share memory
+	 * d 该链表链接d_parent的所有子节点，因此把它称为d_sibling（同胞）更恰当一些 
 	 */
 	union {
 		struct list_head d_child;	/* child of parent list */
 	 	struct rcu_head d_rcu;
 	} d_u;
+    /* 
+     * 该链表将该dentry的所有子节点链接在一起，所以，
+     * 它实际上是它子节点的d_child链表的链表头。这个名字也容易产生误会，
+     * 因为它的子节点不仅仅包括子目录，也可以是文件
+     */
 	struct list_head d_subdirs;	/* our children */
+    /*
+     * 由于文件（以及文件系统的其他一些对象）可能会通过硬链接的方法，拥有多个名字，
+     * 因此有可能会有多个dentry指向同一个索引节点。在这种情况下，
+     * 这些dentry将通过d_alias链接在一起。而inode的i_dentry就是该链表的头
+     */
 	struct hlist_node d_alias;	/* inode alias list */
 };
 

@@ -1630,7 +1630,9 @@ void *__vmalloc_node_range(unsigned long size, unsigned long align,
 	void *addr;
 	unsigned long real_size = size;
 
+    /* vmalloc分配的大小必须是页面的整数倍，这里将长度对齐到页面 */
 	size = PAGE_ALIGN(size);
+    /* 分配长度为0，或者长度大于限制数，都返回失败 */
 	if (!size || (size >> PAGE_SHIFT) > totalram_pages)
 		goto fail;
 

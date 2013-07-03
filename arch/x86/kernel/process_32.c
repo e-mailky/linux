@@ -245,6 +245,13 @@ EXPORT_SYMBOL_GPL(start_thread);
  * The return value (in %ax) will be the "prev" task after
  * the task-switch, and shows up in ret_from_fork in entry.S,
  * for example.
+ * 由於 switch_to() 函數是一個C語言函數，原本應該被其他C語言函數呼叫的，
+ * 呼叫前原本上層函數會先將下一個指令的位址存入堆疊中，然後才進行呼叫。
+ * C語言函數在返回前會從堆疊中取出返回點，以返回上一層函數繼續執行 。
+ * 雖然我們是利用組合語言指令 jmp __switch_to 跳入該函數的，但C語言的編譯器仍然
+ * 會以同樣的方式編譯，於是返回時仍然會從堆疊中取出 pushl %[next_ip] 指令所推入的位址，
+ * 因而在 switch_to() 函數返回時，就會將程式計數器設為 next->thread.ip(在调用本函数前已经压栈)，
+ * 於是透過函數返回的過程，間接的完成了行程切換的動作
  */
 __visible __notrace_funcgraph struct task_struct *
 __switch_to(struct task_struct *prev_p, struct task_struct *next_p)

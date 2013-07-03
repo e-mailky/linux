@@ -155,6 +155,10 @@ struct Qdisc_class_ops {
 					struct gnet_dump *);
 };
 
+/*
+ * 函数指针使用过程中调用顺序是:
+ * ops->init ops->attach ops->change ops->enqueue ops->dequeue ops->reset ops->destroy
+ */
 struct Qdisc_ops {
 	struct Qdisc_ops	*next;
 	const struct Qdisc_class_ops	*cl_ops;

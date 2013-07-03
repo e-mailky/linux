@@ -5,7 +5,7 @@ struct dentry;
 struct vfsmount;
 
 struct path {
-	struct vfsmount *mnt;
+	struct vfsmount *mnt; /* 该域指向该文件所在文件系统的vfsmount结构 */
 	struct dentry *dentry;
 };
 

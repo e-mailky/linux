@@ -109,7 +109,7 @@ EXPORT_SYMBOL(find_next_zero_bit);
 
 #ifndef find_first_bit
 /*
- * Find the first set bit in a memory region.
+ * Find the first set bit in a memory region.return 0~size,size means not find set bit
  */
 unsigned long find_first_bit(const unsigned long *addr, unsigned long size)
 {

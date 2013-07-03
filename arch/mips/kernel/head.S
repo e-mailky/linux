@@ -69,7 +69,7 @@
 #ifdef CONFIG_64BIT
 	setup_c0_status ST0_KX 0
 #else
-	setup_c0_status 0 0
+	setup_c0_status 0 0		# CP0_Status[4:0] 置0，CU0 置1，其他位不变
 #endif
 	.endm
 
@@ -103,11 +103,16 @@ FEXPORT(__kernel_entry)
 
 	__REF
 
+/* 声明函数 kernel_entry,函数的堆栈为16byte，返回地址保存在$sp寄存器,宏NESTED()定义在asm.h*/
 NESTED(kernel_entry, 16, sp)			# kernel entry point
-
+	/*
+	 * 某些MIPS CPU需要额外的设置一些控制寄存器，和具体的平台相关，一般为空宏；
+     * 某些多核MIPS，启动时所有的core的入口一起指向kernel_entry，然后在该宏里分叉，
+     * boot core 继续往下，其它的则不停的判断循环，直到boot core 唤醒之	
+     */
 	kernel_entry_setup			# cpu specific setup
 
-	setup_c0_status_pri
+	setup_c0_status_pri		    #设置cp0_status寄存器
 
 	/* We might not get launched at the address the kernel is linked to,
 	   so we jump there.  */
@@ -115,6 +120,11 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	jr	t0
 0:
 
+/*
+ * 宏定义   CONFIG_MIPS_MT_SMTC 是使用多核的  SMTC Linux 时定义的。
+ * 一般情况下不考虑。 MIPS已经开发出  SMP Linux的改进版，叫做SMTC(线程上下文对称多处理) Linux。 
+ * SMTC Linux能理解轻量级  TC 的概念，并能因此减少某些与SMP Linux相关的开销
+ */
 #ifdef CONFIG_MIPS_MT_SMTC
 	/*
 	 * In SMTC kernel, "CLI" is thread-specific, in TCStatus.
@@ -133,6 +143,7 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	mtc0	t0, CP0_STATUS
 #endif /* CONFIG_MIPS_MT_SMTC */
 
+	/* 清除BSS段，清0 变量__bss_start和__bss_stop 在连接文件arch/mips/kernel/vmlinux.lds 中定义 */
 	PTR_LA		t0, __bss_start		# clear .bss
 	LONG_S		zero, (t0)
 	PTR_LA		t1, __bss_stop - LONGSIZE
@@ -142,20 +153,24 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	bne		t0, t1, 1b
 
 	LONG_S		a0, fw_arg0		# firmware arguments
-	LONG_S		a1, fw_arg1
+	LONG_S		a1, fw_arg1		# bootloader会将要传给内核的参数写在a0~a4里,此处为将参数保存在fw_arg0~fw_arg3四个变量里
 	LONG_S		a2, fw_arg2
 	LONG_S		a3, fw_arg3
 
-	MTC0		zero, CP0_CONTEXT	# clear context register
-	PTR_LA		$28, init_thread_union
-	/* Set the SP after an empty pt_regs.  */
+	MTC0		zero, CP0_CONTEXT	# clear context register #清除CP0的context register,#这个寄存器用来保存页表的起始地
+	PTR_LA		$28, init_thread_union	 #初始化gp,指向一个union，THREAD_SIZE大小，最低处是一个thread_info 结构 
+	/* Set the SP after an empty pt_regs.   # _THREAD_SIZE = THREAD_SIZE */
 	PTR_LI		sp, _THREAD_SIZE - 32 - PT_SIZE
-	PTR_ADDU	sp, $28
+	/* 
+	 * 设置$sp寄存器,堆栈指针.$sp = (init_thread_union 的地址)+_THREAD_SIZE - 32 的得出
+	 * $sp 指向这个  union  结构的结尾地址-32 字节地址 
+	 */
+	PTR_ADDU	sp, $28				 #sp指向这个union结构的最高低32B处
 	back_to_back_c0_hazard
-	set_saved_sp	sp, t0, t1
+	set_saved_sp	sp, t0, t1		# 把#这个cpu核的堆栈地址$sp保存到kernelsp[NR_CPUS]数组
 	PTR_SUBU	sp, 4 * SZREG		# init stack pointer
 
-	j		start_kernel
+	j		start_kernel			# gp,sp #设置好可以进入 C语言环境了
 	END(kernel_entry)
 
 #ifdef CONFIG_SMP

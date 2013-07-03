@@ -49,7 +49,7 @@ int br_dev_queue_push_xmit(struct sk_buff *skb)
 	} else {
 		skb_push(skb, ETH_HLEN);
 		br_drop_fake_rtable(skb);
-		dev_queue_xmit(skb);
+		dev_queue_xmit(skb);//调用到桥设备的ndo_start_xmit=>br_dev_xmit
 	}
 
 	return 0;
@@ -68,6 +68,7 @@ static void __br_deliver(const struct net_bridge_port *to, struct sk_buff *skb)
 	if (!skb)
 		return;
 
+    /* skb->dev替换成将要进行转发的dev */
 	skb->dev = to->dev;
 
 	if (unlikely(netpoll_tx_running(to->br->dev))) {
@@ -80,6 +81,10 @@ static void __br_deliver(const struct net_bridge_port *to, struct sk_buff *skb)
 		return;
 	}
 
+    /*
+     * 调用br_forward_finish,而后者又会调用br_dev_queue_push_xmit。
+     * 最终，br_dev_queue_push_xmit会调用dev_queue_xmit将报文发送出去 
+     */
 	NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_OUT, skb, NULL, skb->dev,
 		br_forward_finish);
 }
@@ -97,10 +102,15 @@ static void __br_forward(const struct net_bridge_port *to, struct sk_buff *skb)
 	if (!skb)
 		return;
 
+    /* skb->dev替换成将要进行转发的dev */
 	indev = skb->dev;
 	skb->dev = to->dev;
 	skb_forward_csum(skb);
 
+    /*
+     * 调用br_forward_finish,而后者又会调用br_dev_queue_push_xmit。
+     * 最终，br_dev_queue_push_xmit会调用dev_queue_xmit将报文发送出去 
+     */
 	NF_HOOK(NFPROTO_BRIDGE, NF_BR_FORWARD, skb, indev, skb->dev,
 		br_forward_finish);
 }
@@ -206,6 +216,7 @@ out:
 }
 
 
+/* 遍历网桥设备中的port_list，找到每一个绑定的dev，然后调用br_deliver将其发送 */
 /* called with rcu_read_lock */
 void br_flood_deliver(struct net_bridge *br, struct sk_buff *skb, bool unicast)
 {

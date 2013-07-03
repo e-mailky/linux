@@ -552,7 +552,7 @@ static int get_device_info(struct us_data *us, const struct usb_device_id *id,
 {
 	struct usb_device *dev = us->pusb_dev;
 	struct usb_interface_descriptor *idesc =
-		&us->pusb_intf->cur_altsetting->desc;
+		&us->pusb_intf->cur_altsetting->desc;//指向usb设备中读取的数据
 	struct device *pdev = &us->pusb_intf->dev;
 
 	/* Store the entries */

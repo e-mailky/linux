@@ -214,11 +214,18 @@ static inline struct net_bridge_port *br_port_get_rtnl(const struct net_device *
 struct net_bridge
 {
 	spinlock_t			lock;
+    /* 链表中的每一个节点（net_bridge_port结构）关联到一个真实的网口设备的net_device */
 	struct list_head		port_list;
 	struct net_device		*dev;
 
 	struct pcpu_sw_netstats		__percpu *stats;
 	spinlock_t			hash_lock;
+    /*
+     * 用来处理地址学习的。当网桥准备转发一个报文时，以报文的目的Mac地址为key
+     * 如果可以在hash表中索引到一个net_bridge_fdb_entry结构，通过这个结构能找到
+     * 一个网口设备的net_device，于是报文就应该从这个网口转发出去；
+     * 否则，报文将从所有网口转发。==> struct net_bridge_fdb_entry
+     */
 	struct hlist_head		hash[BR_HASH_SIZE];
 #ifdef CONFIG_BRIDGE_NETFILTER
 	struct rtable 			fake_rtable;

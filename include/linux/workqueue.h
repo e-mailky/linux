@@ -98,9 +98,9 @@ enum {
 };
 
 struct work_struct {
-	atomic_long_t data;
-	struct list_head entry;
-	work_func_t func;
+	atomic_long_t data;//传给挂起函数的参数，是个指针。
+	struct list_head entry;//如果函数已经在工作队列链表中，它为1，否则为0
+	work_func_t func;//挂起函数的指针
 #ifdef CONFIG_LOCKDEP
 	struct lockdep_map lockdep_map;
 #endif

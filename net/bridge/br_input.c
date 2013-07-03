@@ -24,6 +24,13 @@
 br_should_route_hook_t __rcu *br_should_route_hook __read_mostly;
 EXPORT_SYMBOL(br_should_route_hook);
 
+/* 
+ * 该函数会将skb->dev替换成网桥设备的dev，然后再调用netif_receive_skb
+ * 来处理这个报文。这下子netif_receive_skb函数被递归调用了，但是这一次
+ * 却不会再触发网桥的相关处理函数，因为skb->dev已经被替换，
+ * skb->dev->br_port已经是空了。所以这一次netif_receive_skb函数
+ * 最终会将skb提交给网络层
+ */
 static int br_pass_frame_up(struct sk_buff *skb)
 {
 	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
@@ -125,9 +132,15 @@ int br_handle_frame_finish(struct sk_buff *skb)
 
 	if (skb) {
 		if (dst) {
+            /* 调用br_forward将报文转发给这个dev；*/
 			dst->used = jiffies;
 			br_forward(dst->dst, skb, skb2);
 		} else
+            /*
+             * 如果找不到fdb,则调用br_flood_forward进行转发，该函数会遍历
+             * 网桥设备中的port_list，找到每一个绑定的dev
+             *（除了与skb->dev相同的那个），然后调用br_forward将其转发
+             */
 			br_flood_forward(br, skb, skb2, unicast);
 	}
 
@@ -234,7 +247,7 @@ forward:
 			skb->pkt_type = PACKET_HOST;
 
 		NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, skb, skb->dev, NULL,
-			br_handle_frame_finish);
+			br_handle_frame_finish); // 进入bridge的转发
 		break;
 	default:
 drop:

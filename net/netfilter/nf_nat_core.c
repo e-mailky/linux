@@ -182,7 +182,10 @@ same_src(const struct nf_conn *ct,
 		t->src.u.all == tuple->src.u.all);
 }
 
-/* Only called for SRC manip */
+/* Only called for SRC manip 
+ * 函数是被get_unique_tuple()函数调用,该函数用于查找NAT转换后的要使用的参数,
+ * 如新地址, 新端口,新的tuple是没被使用的, 而get_unique_tuple()函数被nf_nat_setup_info()函数调用
+ */
 static int
 find_appropriate_src(struct net *net, u16 zone,
 		     const struct nf_nat_l3proto *l3proto,
@@ -197,13 +200,14 @@ find_appropriate_src(struct net *net, u16 zone,
 
 	hlist_for_each_entry_rcu(nat, &net->ct.nat_bysource[h], bysource) {
 		ct = nat->ct;
+        // 比较源地址(协议/源地址/源端口)部分是否相同
 		if (same_src(ct, tuple) && nf_ct_zone(ct) == zone) {
-			/* Copy source part from reply tuple. */
+			/* Copy source part from reply tuple.将找到的连接的反向tuple颠倒源和目的参数后赋值给result */
 			nf_ct_invert_tuplepr(result,
 				       &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
 			result->dst = tuple->dst;
 
-			if (in_range(l3proto, l4proto, result, range))
+			if (in_range(l3proto, l4proto, result, range))// 比较是否符合iptables命令中指定的转换后的地址范围
 				return 1;
 		}
 	}

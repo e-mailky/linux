@@ -107,9 +107,11 @@ static int smpboot_thread_fn(void *data)
 	struct smp_hotplug_thread *ht = td->ht;
 
 	while (1) {
+         // 设置当前进程状态为可中断的状态，这种睡眠状态可响应信号处理等。
 		set_current_state(TASK_INTERRUPTIBLE);
+        // 禁止当前进程被抢占。
 		preempt_disable();
-		if (kthread_should_stop()) {
+		if (kthread_should_stop()) { // 当前进程是否应该停止?
 			set_current_state(TASK_RUNNING);
 			preempt_enable();
 			if (ht->cleanup)
@@ -118,7 +120,7 @@ static int smpboot_thread_fn(void *data)
 			return 0;
 		}
 
-		if (kthread_should_park()) {
+		if (kthread_should_park()) { // 当前进程是否应该暂停?
 			__set_current_state(TASK_RUNNING);
 			preempt_enable();
 			if (ht->park && td->status == HP_THREAD_ACTIVE) {

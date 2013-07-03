@@ -61,13 +61,13 @@ typedef __s64	Elf64_Sxword;
 #define PN_XNUM 0xffff
 
 /* These constants define the different elf file types */
-#define ET_NONE   0
-#define ET_REL    1
-#define ET_EXEC   2
-#define ET_DYN    3
-#define ET_CORE   4
-#define ET_LOPROC 0xff00
-#define ET_HIPROC 0xffff
+#define ET_NONE   0  // 未知的目标文件格式 
+#define ET_REL    1  // 可重定位文件
+#define ET_EXEC   2  // 可执行文件
+#define ET_DYN    3  // 共享目标文件
+#define ET_CORE   4  // Core文件 (转储格式)
+#define ET_LOPROC 0xff00  //特定处理器文件
+#define ET_HIPROC 0xffff  // 特定处理器文件
 
 /* This is the info that is needed to parse the dynamic section of the file */
 #define DT_NULL		0
@@ -264,15 +264,15 @@ typedef struct elf64_phdr {
 
 /* sh_type */
 #define SHT_NULL	0
-#define SHT_PROGBITS	1
-#define SHT_SYMTAB	2
-#define SHT_STRTAB	3
-#define SHT_RELA	4
-#define SHT_HASH	5
+#define SHT_PROGBITS	1  //此节区包含程序定义的信息，其格式和含义都由程序来解释
+#define SHT_SYMTAB	2  // 此节区包含一个符号表。
+#define SHT_STRTAB	3  // 此节区包含字符串表 文件可能包含多个字符串表节区
+#define SHT_RELA	4  // 此节区包含重定位表项，其中可能会有补齐内容
+#define SHT_HASH	5  // 此节区包含符号哈希表
 #define SHT_DYNAMIC	6
 #define SHT_NOTE	7
-#define SHT_NOBITS	8
-#define SHT_REL		9
+#define SHT_NOBITS	8  // 这种类型的节区不占用文件中的空间。
+#define SHT_REL		9  // 此节区包含重定位表项，其中没有补全
 #define SHT_SHLIB	10
 #define SHT_DYNSYM	11
 #define SHT_NUM		12
@@ -323,14 +323,14 @@ typedef struct elf64_shdr {
 } Elf64_Shdr;
 
 #define	EI_MAG0		0		/* e_ident[] indexes */
-#define	EI_MAG1		1
-#define	EI_MAG2		2
-#define	EI_MAG3		3
-#define	EI_CLASS	4
-#define	EI_DATA		5
-#define	EI_VERSION	6
-#define	EI_OSABI	7
-#define	EI_PAD		8
+#define	EI_MAG1		1       // 文件标识
+#define	EI_MAG2		2       // 文件标识
+#define	EI_MAG3		3       // 文件标识
+#define	EI_CLASS	4       // 文件类
+#define	EI_DATA		5       // 数据编码
+#define	EI_VERSION	6       // 文件版本
+#define	EI_OSABI	7       // 
+#define	EI_PAD		8       // 补齐字节开始处
 
 #define	ELFMAG0		0x7f		/* EI_MAG */
 #define	ELFMAG1		'E'

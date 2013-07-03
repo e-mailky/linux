@@ -946,22 +946,22 @@ static unsigned int ip_sabotage_in(const struct nf_hook_ops *ops,
 
 /* For br_nf_post_routing, we need (prio = NF_BR_PRI_LAST), because
  * br_dev_queue_push_xmit is called afterwards */
-static struct nf_hook_ops br_nf_ops[] __read_mostly = {
-	{
+static struct nf_hook_ops br_nf_ops[] __read_mostly = {// PF_BRIDGE的挂接点
+	{// PREROUTING点
 		.hook = br_nf_pre_routing,
 		.owner = THIS_MODULE,
 		.pf = NFPROTO_BRIDGE,
 		.hooknum = NF_BR_PRE_ROUTING,
 		.priority = NF_BR_PRI_BRNF,
 	},
-	{
+	{// INPUT点
 		.hook = br_nf_local_in,
 		.owner = THIS_MODULE,
 		.pf = NFPROTO_BRIDGE,
 		.hooknum = NF_BR_LOCAL_IN,
 		.priority = NF_BR_PRI_BRNF,
 	},
-	{
+	{// FORWARD点
 		.hook = br_nf_forward_ip,
 		.owner = THIS_MODULE,
 		.pf = NFPROTO_BRIDGE,
@@ -975,21 +975,22 @@ static struct nf_hook_ops br_nf_ops[] __read_mostly = {
 		.hooknum = NF_BR_FORWARD,
 		.priority = NF_BR_PRI_BRNF,
 	},
-	{
+	{// OUTPUT点
 		.hook = br_nf_post_routing,
 		.owner = THIS_MODULE,
 		.pf = NFPROTO_BRIDGE,
 		.hooknum = NF_BR_POST_ROUTING,
 		.priority = NF_BR_PRI_LAST,
 	},
-	{
+	{// POSTROUTING点
 		.hook = ip_sabotage_in,
 		.owner = THIS_MODULE,
 		.pf = NFPROTO_IPV4,
 		.hooknum = NF_INET_PRE_ROUTING,
 		.priority = NF_IP_PRI_FIRST,
 	},
-	{
+	{/* 后面是PF_INET/PF_INET6的挂接点, 其实也没进行什么数据包操作,
+        就是自身的输入输出包不通过桥处理,要短路掉 */
 		.hook = ip_sabotage_in,
 		.owner = THIS_MODULE,
 		.pf = NFPROTO_IPV6,

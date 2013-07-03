@@ -276,11 +276,12 @@ struct kmem_cache_node {
 	spinlock_t list_lock;
 
 #ifdef CONFIG_SLAB
+    // 该链表中slab中既有正在使用的对象,也有空闲对象
 	struct list_head slabs_partial;	/* partial list first, better asm code */
-	struct list_head slabs_full;
-	struct list_head slabs_free;
-	unsigned long free_objects;
-	unsigned int free_limit;
+	struct list_head slabs_full;    // 该链表中slab的对象都在使用中
+	struct list_head slabs_free;    // 该链表中slab的对象都是空闲的
+	unsigned long free_objects;     // 空闲的对象数
+	unsigned int free_limit;        // 空闲的限值,超过就该释放掉一些
 	unsigned int colour_next;	/* Per-node cache coloring */
 	struct array_cache *shared;	/* shared per node */
 	struct array_cache **alien;	/* on other nodes */

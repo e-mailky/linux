@@ -151,6 +151,7 @@ void br_stp_timer_init(struct net_bridge *br)
 		      br_topology_change_timer_expired,
 		      (unsigned long) br);
 
+    // 定时器周期性地调用br_fdb_cleanup函数来清除过期的fdb
 	setup_timer(&br->gc_timer, br_fdb_cleanup, (unsigned long) br);
 }
 

@@ -545,7 +545,7 @@ EXPORT_SYMBOL_GPL(usb_submit_urb);
 /*-------------------------------------------------------------------*/
 
 /**
- * usb_unlink_urb - abort/cancel a transfer request for an endpoint
+ * usb_unlink_urb - 异步abort/cancel a transfer request for an endpoint
  * @urb: pointer to urb describing a previously submitted request,
  *	may be NULL
  *
@@ -630,7 +630,7 @@ int usb_unlink_urb(struct urb *urb)
 EXPORT_SYMBOL_GPL(usb_unlink_urb);
 
 /**
- * usb_kill_urb - cancel a transfer request and wait for it to finish
+ * usb_kill_urb - 同步cancel a transfer request and wait for it to finish
  * @urb: pointer to URB describing a previously submitted request,
  *	may be NULL
  *
@@ -661,9 +661,10 @@ void usb_kill_urb(struct urb *urb)
 	might_sleep();
 	if (!(urb && urb->dev && urb->ep))
 		return;
-	atomic_inc(&urb->reject);
+	atomic_inc(&urb->reject);//这里增加是防止这边在取消urb,另外一边又在提交
 
 	usb_hcd_unlink_urb(urb, -ENOENT);
+    //usb_kill_urb_queue是在hcd.h里定义的一个等待队列,urb->use_count为0时.醒来
 	wait_event(usb_kill_urb_queue, atomic_read(&urb->use_count) == 0);
 
 	atomic_dec(&urb->reject);

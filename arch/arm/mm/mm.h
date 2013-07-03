@@ -22,6 +22,10 @@ static inline void set_top_pte(unsigned long va, pte_t pte)
 {
 	pte_t *ptep = pte_offset_kernel(top_pmd, va);
 	set_pte_ext(ptep, pte, 0);
+    /**
+     * 清空tlb中的无效索引，因为以前可能建立该虚拟地址的pte页表项并且在
+     * tlb存在无效tlb项，要让新pte页表项生效，必须使旧的tlb项失效 
+     */
 	local_flush_tlb_kernel_page(va);
 }
 

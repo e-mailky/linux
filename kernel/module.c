@@ -2466,12 +2466,14 @@ static int elf_header_check(struct load_info *info)
 	if (info->len < sizeof(*(info->hdr)))
 		return -ENOEXEC;
 
-	if (memcmp(info->hdr->e_ident, ELFMAG, SELFMAG) != 0
-	    || info->hdr->e_type != ET_REL
+	if (memcmp(info->hdr->e_ident, ELFMAG, SELFMAG) != 0 //验证是否是elf文件
+	    || info->hdr->e_type != ET_REL // e_type 目标文件类型
 	    || !elf_check_arch(info->hdr)
-	    || info->hdr->e_shentsize != sizeof(Elf_Shdr))
+	    || info->hdr->e_shentsize != sizeof(Elf_Shdr))// e_shentsize节区头部表格的表项大小
 		return -ENOEXEC;
 
+    //e_shoff 节区头部表格的偏移量(按字节计算)。如果文件没有节区头部表格，可以为0
+    //e_shnum 节区头部表格的表项数目。可以为0的
 	if (info->hdr->e_shoff >= info->len
 	    || (info->hdr->e_shnum * sizeof(Elf_Shdr) >
 		info->len - info->hdr->e_shoff))
@@ -2578,7 +2580,7 @@ static int rewrite_section_headers(struct load_info *info, int flags)
 
 	for (i = 1; i < info->hdr->e_shnum; i++) {
 		Elf_Shdr *shdr = &info->sechdrs[i];
-		if (shdr->sh_type != SHT_NOBITS
+		if (shdr->sh_type != SHT_NOBITS  //sh_type 为节区的内容和语义进行分类
 		    && info->len < shdr->sh_offset + shdr->sh_size) {
 			pr_err("Module len %lu truncated\n", info->len);
 			return -ENOEXEC;
@@ -2621,8 +2623,14 @@ static struct module *setup_load_info(struct load_info *info, int flags)
 	struct module *mod;
 
 	/* Set up the convenience variables */
-	info->sechdrs = (void *)info->hdr + info->hdr->e_shoff;
-	info->secstrings = (void *)info->hdr
+	info->sechdrs = (void *)info->hdr + info->hdr->e_shoff;//可以确定节区开始位置
+    /*
+      e_shstrndx 节区头部表格中与节区名称字符串表相关的表项的索引。
+      如果文件没有节区名称字符串表，该参数可以为SHN_UNDEF
+      sh_offset 该成员的取值给出节区的第一个字节与文件头之间的偏移。
+      确定节区名称字符串的位置
+    */
+    info->secstrings = (void *)info->hdr
 		+ info->sechdrs[info->hdr->e_shstrndx].sh_offset;
 
 	err = rewrite_section_headers(info, flags);

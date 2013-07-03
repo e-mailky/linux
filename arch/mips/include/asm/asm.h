@@ -57,6 +57,10 @@ symbol:		.frame	sp, 0, ra
 
 /*
  * NESTED - declare nested routine entry point
+ * frame 用来声明堆栈布局
+ *   第一个参数  framereg：声明用于访问局部堆栈的寄存器，一般为  $sp
+ *   第二个参数  framesize：申明该函数已分配堆栈的大小，应该符合 $sp+framesize=原来的$sp
+ *   第三个参数  returnreg：这个寄存器用来保存返回地址
  */
 #define NESTED(symbol, framesize, rpc)			\
 		.globl	symbol;				\

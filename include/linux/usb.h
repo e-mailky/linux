@@ -64,8 +64,8 @@ struct ep_device;
 struct usb_host_endpoint {
 	struct usb_endpoint_descriptor		desc;
 	struct usb_ss_ep_comp_descriptor	ss_ep_comp;
-	struct list_head		urb_list;
-	void				*hcpriv;
+	struct list_head		urb_list;   // 端点要处理的urb队列
+	void				*hcpriv;    //这是提供给HCD（host controller driver）用的
 	struct ep_device		*ep_dev;	/* For sysfs info */
 
 	unsigned char *extra;   /* Extra descriptors */
@@ -508,40 +508,43 @@ struct usb3_lpm_parameters {
  * usb_set_device_state().
  */
 struct usb_device {
-	int		devnum;
+	int		devnum; //usb 设备在一条usb 总线上的编号,choose_address()函数选择的一个编号
 	char		devpath[16];
 	u32		route;
 	enum usb_device_state	state;
 	enum usb_device_speed	speed;
 
-	struct usb_tt	*tt;
+	struct usb_tt	*tt;//transaction translator 负责高速和低速/全速的数据转换
 	int		ttport;
 
-	unsigned int toggle[2];
+	unsigned int toggle[2];//对应IN 和OUT 端点，每一个端点占一位,每一位表示的就是每个端点
+	                       //当前发送或接收的数据包是DATA0 还是DATA1
 
-	struct usb_device *parent;
+	struct usb_device *parent;//root hub时,为null
 	struct usb_bus *bus;
-	struct usb_host_endpoint ep0;
+	struct usb_host_endpoint ep0;//0号端点
 
 	struct device dev;
 
 	struct usb_device_descriptor descriptor;
 	struct usb_host_bos *bos;
-	struct usb_host_config *config;
+	struct usb_host_config *config; /* 分别表示设备拥有的所有配置和当前激活的，
+	                                 * 也就是正在使用的配置*/
 
-	struct usb_host_config *actconfig;
+	struct usb_host_config *actconfig;// 正在使用的配置
 	struct usb_host_endpoint *ep_in[16];
 	struct usb_host_endpoint *ep_out[16];
 
-	char **rawdescriptors;
+	char **rawdescriptors;/* 这是个字符指针数组，数组里的每一项都指向一个使用
+                           * GET_DESCRIPTOR 请求去获得配置描述符时所得到的结果*/
 
-	unsigned short bus_mA;
+	unsigned short bus_mA;//host controller的驱动程序中设置的，通常usb端口可以提供500mA的电流。
 	u8 portnum;
-	u8 level;
+	u8 level;   //表征usb 设备树的级连关系
 
 	unsigned can_submit:1;
 	unsigned persist_enabled:1;
-	unsigned have_langid:1;
+	unsigned have_langid:1;//have_langid 用来判断string_langid 是否有效
 	unsigned authorized:1;
 	unsigned authenticated:1;
 	unsigned wusb:1;
@@ -551,7 +554,7 @@ struct usb_device {
 	unsigned usb2_hw_lpm_enabled:1;
 	unsigned usb2_hw_lpm_allowed:1;
 	unsigned usb3_lpm_enabled:1;
-	int string_langid;
+	int string_langid;//就是用来指定使用哪种语言的
 
 	/* static strings from the device */
 	char *product;
@@ -560,7 +563,7 @@ struct usb_device {
 
 	struct list_head filelist;
 
-	int maxchild;
+	int maxchild;//hub 的端口数，注意可不包括上行端口。
 
 	u32 quirks;
 	atomic_t urbnum;
@@ -1049,10 +1052,12 @@ struct usb_driver {
 	const char *name;
 
 	int (*probe) (struct usb_interface *intf,
-		      const struct usb_device_id *id);
+		      const struct usb_device_id *id);//用来看看这个usb 驱动是否愿意接受某个接口的函数
 
+    //接口失去联系，或使用rmmod卸载驱动将它和接口强行分开时被调用
 	void (*disconnect) (struct usb_interface *intf);
 
+    //当你的驱动有通过usbfs和用户空间交流的需要的话，就使用它吧
 	int (*unlocked_ioctl) (struct usb_interface *intf, unsigned int code,
 			void *buf);
 
@@ -1063,12 +1068,12 @@ struct usb_driver {
 	int (*pre_reset)(struct usb_interface *intf);
 	int (*post_reset)(struct usb_interface *intf);
 
-	const struct usb_device_id *id_table;
+	const struct usb_device_id *id_table;//驱动支持的所有设备的花名册
 
-	struct usb_dynids dynids;
+	struct usb_dynids dynids;//动态增加id的支持
 	struct usbdrv_wrap drvwrap;
-	unsigned int no_dynamic_id:1;
-	unsigned int supports_autosuspend:1;
+	unsigned int no_dynamic_id:1;//可以用来禁止动态id 的
+	unsigned int supports_autosuspend:1;//如果设置为0 的话,就不再允许绑定到这个驱动的接口autosuspend。
 	unsigned int disable_hub_initiated_lpm:1;
 	unsigned int soft_unbind:1;
 };
@@ -1175,9 +1180,13 @@ extern int usb_disabled(void);
  *
  * Note: URB_DIR_IN/OUT is automatically set in usb_submit_urb().
  */
+/* 如果收到一个DATA类型的包的payload < usb_endpoint_descriptor.wMaxPacketSize
+ * 且又设置了URB_SHORT_NOT_OK标志,就表示错了*/
 #define URB_SHORT_NOT_OK	0x0001	/* report short reads as errors */
 #define URB_ISO_ASAP		0x0002	/* iso-only; use the first unexpired
-					 * slot in the schedule */
+					 * slot in the schedule 
+					 * urb->start_frame 告诉HCD 啥时候不忙就啥时候开始，
+					 * 就不用指定什么开始的帧号了*/
 #define URB_NO_TRANSFER_DMA_MAP	0x0004	/* urb->transfer_dma valid on submit */
 #define URB_NO_FSBR		0x0020	/* UHCI-specific */
 #define URB_ZERO_PACKET		0x0040	/* Finish bulk OUT with short packet */
@@ -1200,7 +1209,7 @@ extern int usb_disabled(void);
 #define URB_ALIGNED_TEMP_BUFFER	0x00800000	/* Temp buffer was alloc'd */
 
 struct usb_iso_packet_descriptor {
-	unsigned int offset;
+	unsigned int offset;    //表示transfer_buffer里的偏移位置
 	unsigned int length;		/* expected length */
 	unsigned int actual_length;
 	int status;
@@ -1413,13 +1422,14 @@ struct urb {
 	/* private: usb core and host controller only fields in the urb */
 	struct kref kref;		/* reference count of the URB */
 	void *hcpriv;			/* private data for host controller */
-	atomic_t use_count;		/* concurrent submissions counter */
-	atomic_t reject;		/* submissions will fail */
+	atomic_t use_count;		/* concurrent submissions counter
+	                         * 只是用来统计当前这个urb 是不是正在被其中一个HCD处理*/
+	atomic_t reject;		/* submissions will fail 防止这边在取消urb,另外一边又在提交urb给HCD*/
 	int unlinked;			/* unlink error code */
 
 	/* public: documented fields in the urb that can be used by drivers */
 	struct list_head urb_list;	/* list head for use by the urb's
-					 * current owner */
+					 * current owner 链接到目的端点的list_head里面 */
 	struct list_head anchor_list;	/* the URB may be anchored */
 	struct usb_anchor *anchor;
 	struct usb_device *dev;		/* (in) pointer to associated device */
@@ -1437,9 +1447,11 @@ struct urb {
 	u32 actual_length;		/* (return) actual transfer length */
 	unsigned char *setup_packet;	/* (in) setup packet (control only) */
 	dma_addr_t setup_dma;		/* (in) dma addr for setup_packet */
-	int start_frame;		/* (modify) start frame (ISO) */
+	int start_frame;		/* (modify) start frame (ISO) 如果没有指定URB_ISO_ASAP 标志，
+	                         * 就必须设置start_frame指定等时传输在哪帧或微帧开始。
+	                         * 如果指定了URB_ISO_ASAP，urb 结束时会使用这个值返回实际的开始帧号。*/
 	int number_of_packets;		/* (in) number of ISO packets */
-	int interval;			/* (modify) transfer interval
+	int interval;			/* (modify) transfer interval 2^(bInterval-1)*125(微帧)
 					 * (INT/ISO) */
 	int error_count;		/* (return) number of ISO errors */
 	void *context;			/* (in) context for completion */

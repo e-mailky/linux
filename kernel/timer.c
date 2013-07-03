@@ -59,8 +59,8 @@ EXPORT_SYMBOL(jiffies_64);
 /*
  * per-CPU timer vector definitions:
  */
-#define TVN_BITS (CONFIG_BASE_SMALL ? 4 : 6)
-#define TVR_BITS (CONFIG_BASE_SMALL ? 6 : 8)
+#define TVN_BITS (CONFIG_BASE_SMALL ? 4 : 6) // 根据配置CONFIG_BASE_SMALL来确定向量链表数是32还是128
+#define TVR_BITS (CONFIG_BASE_SMALL ? 6 : 8) // 根据配置CONFIG_BASE_SMALL来确定root链表数是128还是512
 #define TVN_SIZE (1 << TVN_BITS)
 #define TVR_SIZE (1 << TVR_BITS)
 #define TVN_MASK (TVN_SIZE - 1)
@@ -75,21 +75,22 @@ struct tvec_root {
 	struct list_head vec[TVR_SIZE];
 };
 
-struct tvec_base {
+struct tvec_base { // 时钟向量base结构
 	spinlock_t lock;
 	struct timer_list *running_timer;
-	unsigned long timer_jiffies;
+	unsigned long timer_jiffies;    // 基准时间
 	unsigned long next_timer;
 	unsigned long active_timers;
-	struct tvec_root tv1;
-	struct tvec tv2;
+	struct tvec_root tv1;   // root HASH链
+	struct tvec tv2;        // 二级HASH链表
 	struct tvec tv3;
 	struct tvec tv4;
 	struct tvec tv5;
 } ____cacheline_aligned;
 
-struct tvec_base boot_tvec_bases;
+struct tvec_base boot_tvec_bases;   // 定义内核时钟base全局变量
 EXPORT_SYMBOL(boot_tvec_bases);
+// 为每个CPU定义一个时钟向量基表
 static DEFINE_PER_CPU(struct tvec_base *, tvec_bases) = &boot_tvec_bases;
 
 /* Functions below help us manage 'deferrable' flag */
@@ -344,25 +345,25 @@ __internal_add_timer(struct tvec_base *base, struct timer_list *timer)
 	unsigned long idx = expires - base->timer_jiffies;
 	struct list_head *vec;
 
-	if (idx < TVR_SIZE) {
+	if (idx < TVR_SIZE) { // 时间差小于TVR_SIZE个jiffie时插入HASH表1,i是HASH值确定HASH表中具体的链表，以下相同
 		int i = expires & TVR_MASK;
 		vec = base->tv1.vec + i;
-	} else if (idx < 1 << (TVR_BITS + TVN_BITS)) {
+	} else if (idx < 1 << (TVR_BITS + TVN_BITS)) { // 小于2^(TVR_BITS + TVN_BITS)个jiffie时插入HASH表2
 		int i = (expires >> TVR_BITS) & TVN_MASK;
 		vec = base->tv2.vec + i;
-	} else if (idx < 1 << (TVR_BITS + 2 * TVN_BITS)) {
+	} else if (idx < 1 << (TVR_BITS + 2 * TVN_BITS)) { // 小于2^(TVR_BITS + 2 * TVN_BITS)个jiffie时插入HASH表3
 		int i = (expires >> (TVR_BITS + TVN_BITS)) & TVN_MASK;
 		vec = base->tv3.vec + i;
 	} else if (idx < 1 << (TVR_BITS + 3 * TVN_BITS)) {
 		int i = (expires >> (TVR_BITS + 2 * TVN_BITS)) & TVN_MASK;
 		vec = base->tv4.vec + i;
-	} else if ((signed long) idx < 0) {
+	} else if ((signed long) idx < 0) {// 否则时间差似乎是个负数时插入HASH表1
 		/*
 		 * Can happen if you add a timer with expires == jiffies,
 		 * or you set a timer to go off in the past
 		 */
 		vec = base->tv1.vec + (base->timer_jiffies & TVR_MASK);
-	} else {
+	} else {  // 否则插入HASH表5
 		int i;
 		/* If the timeout is larger than MAX_TVAL (on 64-bit
 		 * architectures or with CONFIG_BASE_SMALL=1) then we
@@ -381,6 +382,11 @@ __internal_add_timer(struct tvec_base *base, struct timer_list *timer)
 	list_add_tail(&timer->entry, vec);
 }
 
+/*
+ * 该函数根据超时时间将定时器加入到合适的链表,
+ * HASH表分五级,是根据超时时间来划分的,超时越短所在的HASH号就越小,
+ * 时钟中断是主要检查HASH表1中的中断,其他HASH表号越大检查此时越少
+ */
 static void internal_add_timer(struct tvec_base *base, struct timer_list *timer)
 {
 	__internal_add_timer(base, timer);
@@ -621,7 +627,7 @@ static inline void debug_assert_init(struct timer_list *timer)
 static void do_init_timer(struct timer_list *timer, unsigned int flags,
 			  const char *name, struct lock_class_key *key)
 {
-	struct tvec_base *base = __raw_get_cpu_var(tvec_bases);
+	struct tvec_base *base = __raw_get_cpu_var(tvec_bases); // 指定该时钟的base
 
 	timer->entry.next = NULL;
 	timer->base = (void *)((unsigned long)base | flags);
@@ -747,7 +753,7 @@ __mod_timer(struct timer_list *timer, unsigned long expires,
 #endif
 	new_base = per_cpu(tvec_bases, cpu);
 
-	if (base != new_base) {
+	if (base != new_base) {// 如果当前CPU的timer base不是当前timer中的base, 更新timer的base
 		/*
 		 * We are trying to schedule the timer on the local CPU.
 		 * However we can't change timer's base while it is running,
@@ -1639,6 +1645,12 @@ static struct notifier_block timers_nb = {
 };
 
 
+/*
+ * 1）初始化本 CPU 上的定时器（timer）相关的数据结构
+ * 2）向 cpu_chain 通知链注册元素 timers_nb，该元素的回调函数用于初始化指定
+ *    CPU 上的定时器相关的数据结构
+ * 3） 初始化时钟的软中断处理函数
+ */
 void __init init_timers(void)
 {
 	int err;

@@ -40,9 +40,11 @@ struct address_space;
  * of struct page. That is currently only used by slub but the arrangement
  * allows the use of atomic double word operations on the flags/mapping
  * and lru list pointers also.
+ * 页帧。由于每个页面都有这样一个结构，为了避免占用太多内存，本结构的字段有复用的情况。
+ * 即一个字段中不同的位表示不同的含义；在不同的情况下，同一个字段可能被用作其他意义
  */
 struct page {
-	/* First double word block */
+	/* First double word block 页面标志，同时也有一些位用于表示页面所处的管理区编号 */
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
 	union {
@@ -104,6 +106,9 @@ struct page {
 					 * get_page_unless_zero() will
 					 * never succeed on tail
 					 * pages.
+                     * 映射计数，即有多少个pte映射到此页面。
+                     * 小于0表示没有映射，＝0表示有一个进程在对该页面进行私有映射，
+                     * 大于0表示有多个进程对它进程了共享映射。
 					 */
 					atomic_t _mapcount;
 
@@ -114,7 +119,7 @@ struct page {
 					};
 					int units;	/* SLOB */
 				};
-				atomic_t _count;		/* Usage count, see below. */
+				atomic_t _count;		/* Usage count, see below. 使用计数 */
 			};
 			unsigned int active;	/* SLAB */
 		};
@@ -122,6 +127,7 @@ struct page {
 
 	/* Third double word block */
 	union {
+        /* 通过此字段，将页面链接到LRU链表中去。由zone->lru_lock保护 */
 		struct list_head lru;	/* Pageout list, eg. active_list
 					 * protected by zone->lru_lock !
 					 */
@@ -148,7 +154,13 @@ struct page {
 
 	/* Remainder is not double word aligned */
 	union {
-		unsigned long private;		/* Mapping-private opaque data:
+        /**
+         * 如果页面是文件系统中的缓冲页，则它指向页面内的第一个缓存块(buffer_head)。
+         * 如果页面是交换页，则指向swp_entry_t
+         * 如果页是空闲的，则该字段由伙伴系统使用。
+         * 当用于伙伴系统时，如果该页是一个2^k的空闲页块的第一个页，那么它的值就是k.
+         */               		
+        unsigned long private;		/* Mapping-private opaque data:
 					 	 * usually used for buffer_heads
 						 * if PagePrivate set; used for
 						 * swp_entry_t if PageSwapCache;
@@ -162,7 +174,9 @@ struct page {
 		spinlock_t ptl;
 #endif
 #endif
+        // 在被SLUB页面管理算法用来指向一个slab
 		struct kmem_cache *slab_cache;	/* SL[AU]B: Pointer to slab */
+        /* 如果属于伙伴系统，并且不是伙伴系统中的第一个页(一个伙伴中最多可能有2^11个页)，则指向第一个页*/
 		struct page *first_page;	/* Compound tail pages */
 	};
 
@@ -177,9 +191,11 @@ struct page {
 	 * WANT_PAGE_VIRTUAL in asm/page.h
 	 */
 #if defined(WANT_PAGE_VIRTUAL)
+    /* 如果可以通过内核可以直接访问此页面，那么此字段就是它的虚拟地 */
 	void *virtual;			/* Kernel virtual address (NULL if
 					   not kmapped, ie. highmem) */
 #endif /* WANT_PAGE_VIRTUAL */
+    /* 最后两个字段都用于调试 */
 #ifdef CONFIG_WANT_PAGE_DEBUG_FLAGS
 	unsigned long debug_flags;	/* Use atomic bitops on this */
 #endif

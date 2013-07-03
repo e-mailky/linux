@@ -777,6 +777,10 @@ struct file {
 		struct llist_node	fu_llist;
 		struct rcu_head 	fu_rcuhead;
 	} f_u;
+    /*
+     * 该域指向该文件的索引节点的dcache入口。如果文件的索引节点不在普通的文件系统中，
+     * 而是诸如管道pipe之类的对象，那么，dentry将是一个由d_alloc_root创建的root dentry
+     */
 	struct path		f_path;
 #define f_dentry	f_path.dentry
 	struct inode		*f_inode;	/* cached value */
@@ -787,11 +791,16 @@ struct file {
 	 * Must not be taken from IRQ context.
 	 */
 	spinlock_t		f_lock;
-	atomic_long_t		f_count;
+	atomic_long_t		f_count; /* 引用该文件的计数。是用户进程的引用数加上内部的引用数 */
+    /*
+     * 该域存储了进程对该文件的访问类型，比如O_NONBLOCK,O_APPEND等等。
+     * 有些标志比如O_EXCL,O_CREAT等等，只在打开文件的时候使用，因此并不存储在f_flags中 
+     */
 	unsigned int 		f_flags;
-	fmode_t			f_mode;
+	fmode_t			f_mode; /* 对文件的操作标志，只读，只写，以及读写 */
 	struct mutex		f_pos_lock;
-	loff_t			f_pos;
+	loff_t			f_pos;  /* 该域存储了文件的当前位置 */
+    /* 存储了一个进程id，以及当特定事件发生在该文件时发送的一个信号，比如当有新数据到来的时候等等 */
 	struct fown_struct	f_owner;
 	const struct cred	*f_cred;
 	struct file_ra_state	f_ra;
@@ -1244,18 +1253,30 @@ struct sb_writers {
 };
 
 struct super_block {
-	struct list_head	s_list;		/* Keep this first */
+	struct list_head	s_list;		/* Keep this first 所有已装载文件系统的双向链表 */
+    /* 装载该文件系统的设备（可以是匿名设备）标识号，举例来说，对于/dev/hda1，其设备标识号为ox301 */
 	dev_t			s_dev;		/* search index; _not_ kdev_t */
-	unsigned char		s_blocksize_bits;
-	unsigned long		s_blocksize;
+	unsigned char		s_blocksize_bits; /* 块大小所占的位数，即log2(s_blocksize) */
+	unsigned long		s_blocksize;/* 该文件系统的基本数据块的大小。以字节为单位，并且必须是2的n次方 */
 	loff_t			s_maxbytes;	/* Max file size */
-	struct file_system_type	*s_type;
+	struct file_system_type	*s_type;/* 指向文件系统的file_system_type结构。  */
 	const struct super_operations	*s_op;
-	const struct dquot_operations	*dq_op;
+	const struct dquot_operations	*dq_op;/* 指向一个磁盘限额（DiscQuota）操作集。*/
 	const struct quotactl_ops	*s_qcop;
 	const struct export_operations *s_export_op;
+    /*
+     * 这是一组操作权限标志，它将与索引节点的标志进行逻辑或操作，从而确定某一特定的行为。
+     * 这里有一个标志，可以应用于整个文件系统，就是MS_RDONLY。一个设置了如此
+     * 标志的文件系统将被以只读的方式装载，任何直接或者间接的写操作都被禁止，
+     * 包括超级块中装载时间和文件访问时间的改变等等。 
+     */
 	unsigned long		s_flags;
 	unsigned long		s_magic;
+    /*
+     * 是一个指向dentry结构的指针。它指向该文件系统的根。通常它是由装载文件
+     * 系统的根结点（root inode）时创建的，并将它传递给d_alloc_root。
+     * 这个dentry将被mount命令加入到dcache中
+     */
 	struct dentry		*s_root;
 	struct rw_semaphore	s_umount;
 	int			s_count;

@@ -2294,7 +2294,7 @@ static void *__slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
 #endif
 
 	page = c->page;
-	if (!page)
+	if (!page)  // 如果没有本地活动 slab，转到 (f) 步骤获取 slab 。
 		goto new_slab;
 redo:
 
@@ -2336,11 +2336,16 @@ redo:
 	stat(s, ALLOC_REFILL);
 
 load_freelist:
+    // 检查处理器活动 slab 没有空闲对象，转到 (e) 步骤。
 	/*
 	 * freelist is pointing to the list of objects to be used.
 	 * page is pointing to the page from which the objects are obtained.
 	 * That page must be frozen for per cpu allocations to work.
 	 */
+     // 此时活动 slab 尚有空闲对象，将 slab 的空闲对象队列指针复制到 
+    // kmem_cache_cpu 结构的 freelist 字段，把 slab 的空闲对象队列指针设置为空，
+    // 从此以后只从 kmem_cache_cpu 结构的 freelist 字段获得空闲对象队列信息。
+
 	VM_BUG_ON(!c->page->frozen);
 	c->freelist = get_freepointer(s, freelist);
 	c->tid = next_tid(c->tid);

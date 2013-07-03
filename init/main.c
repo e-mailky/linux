@@ -346,6 +346,8 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
  * We also need to store the touched command line since the parameter
  * parsing is performed in place, and we should allow a component to
  * store reference of name/value for future reference.
+ * 保存未改变的comand_line到字符数组 static_command_line[]中;
+ * 保存boot_command_line到字符数组saved_command_line[] 
  */
 static void __init setup_command_line(char *command_line)
 {
@@ -478,6 +480,7 @@ static void __init mm_init(void)
 
 asmlinkage void __init start_kernel(void)
 {
+    // 定义了核的参数数据结构
 	char * command_line;
 	extern const struct kernel_param __start___param[], __stop___param[];
 
@@ -485,8 +488,8 @@ asmlinkage void __init start_kernel(void)
 	 * Need to run as early as possible, to initialize the
 	 * lockdep hash:
 	 */
-	lockdep_init();
-	smp_setup_processor_id();
+	lockdep_init();             // 初始化核依赖关系哈希表
+	smp_setup_processor_id();   // 设置SMP多核的CPU核的ID号，单核不进行任何操作
 	debug_objects_early_init();
 
 	/*
@@ -496,29 +499,47 @@ asmlinkage void __init start_kernel(void)
 
 	cgroup_init_early();
 
-	local_irq_disable();
+	local_irq_disable();    // 关闭当前  CPU 核的中断
+    /*
+     * 通过一个静态全局变量early_boot_irqs_enabled 来帮助我们调试代码,
+     * 通过这个标记可以帮助我们知道是否在"early bootup code",也可以通过这个
+     * 标志警告是否有无效的中断打开
+     */
 	early_boot_irqs_disabled = true;
 
 /*
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
  */
+    /* 对于多核的系统来说，设置第一个CPU核为活跃CPU核,对于单CPU核系统来说，设置CPU核为活跃CPU */
 	boot_cpu_init();
+    /* 当定义了CONFIG_HIGHMEM宏，并且没有定义WANT_PAGE_VIRTUAL宏时，非空函数.其他情况为空函数 */
 	page_address_init();
 	pr_notice("%s", linux_banner);
 	setup_arch(&command_line);
 	mm_init_owner(&init_mm, &init_task);
 	mm_init_cpumask(&init_mm);
-	setup_command_line(command_line);
+	setup_command_line(command_line);   /* 保存command_line */
 	setup_nr_cpu_ids();
-	setup_per_cpu_areas();
+	setup_per_cpu_areas();  // setup_per_cpu_areas() 函数给每个CPU分配内存，并拷贝   .data.percpu 段的数据
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
 
+    /*
+     * 建立各个节点的管理区的zonelist，便于分配内存的fallback 使用.
+     * 这个链表的作用: 为了在一个分配不能够满足时可以考察下一个管理区来设置了.
+     * 在考察结束时，分配将从ZONE_HIGHMEM 回退到 ZONE_NORMAL,
+     * 在分配时从 ZONE_NORMAL 退回到  ZONE_DMA 就不会回退了
+     */
 	build_all_zonelists(NULL, NULL);
 	page_alloc_init();
 
 	pr_notice("Kernel command line: %s\n", boot_command_line);
 	parse_early_param();
+    /*
+     * 对linux启动命令行参数进行再分析和处理.这两个变量__start___param 和
+     * __stop___param在链接脚本arch/mips/kernel/vmlinux.lds 中定义.
+     * 最后一个参数为，当不能够识别linux 启动命令行参数时，调用的函数
+     */
 	parse_args("Booting kernel", static_command_line, __start___param,
 		   __stop___param - __start___param,
 		   -1, -1, &unknown_bootoption);
@@ -530,46 +551,72 @@ asmlinkage void __init start_kernel(void)
 	 * kmem_cache_init()
 	 */
 	setup_log_buf(0);
+    /* 系统在初始化阶段动态的分配了4个hashtable，并把它们的地址存入pid_hash[]数组.便于从PID查找进程描述符 */
 	pidhash_init();
 	vfs_caches_init_early();
+    /* 对内核建立的异常处理调用函数表(exception table)根据异常的向量号进行堆排序 */
 	sort_main_extable();
-	trap_init();
+	trap_init();    /* 设置CPU的异常处理函数，TLB重填，cache出错，还有通用异常处理表的初始化 */
 	mm_init();
 
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
 	 * timer interrupt). Full topology setup happens at smp_init()
 	 * time - but meanwhile we still have a functioning scheduler.
+     * 核心进程调度器初始化，调度器的初始化优先于任何中断的建立（包括  timer 中断）
+     * 并且初始化进程0，即idle进程，但是并没有设置 idle 进程的  NEED_RESCHED 标志,
+     * 以完成内核剩余的启动部
 	 */
 	sched_init();
 	/*
 	 * Disable preemption - early bootup scheduling is extremely
 	 * fragile until we cpu_idle() for the first time.
+     * disable内核的抢占.使当前进程的struct thread_info结构preempt_count成员的值增加1
 	 */
 	preempt_disable();
 	if (WARN(!irqs_disabled(), "Interrupts were enabled *very* early, fixing it\n"))
 		local_irq_disable();
 	idr_init_cache();
-	rcu_init();
+	rcu_init();  /* 初始化  RCU 机制，这个步骤必须比本地  timer 的初始化早 */
 	tick_nohz_init();
 	context_tracking_init();
 	radix_tree_init();
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
+    /* 用来初始化中断处理硬件相关的寄存器和中断描述符数组irq_desc[]数组,每个中断号都有一个对应的中断描述*/
 	init_IRQ();
+    /* 
+     * 如果没有定义CONFIG_GENERIC_CLOCKEVENTS，
+     * 则这个函数为空函数,执行执行初始化tick控制功能，注册 clockevents 的框架
+     */
 	tick_init();
 	init_timers();
 	hrtimers_init();
 	softirq_init();
-	timekeeping_init();
-	time_init();
+	timekeeping_init();  // 初始化系统计时器
+	time_init();         // 初始化系统时钟源,对MIPS体系结构的clocksource_mips时钟源进行配置和注册
 	sched_clock_postinit();
 	perf_event_init();
+    /*
+     * 对内核的profile功能进行初始化，这是一个内核调式工具,通过这个可以发现内核
+     * 在内核态的什么地方花费时间最多,即发现内核的"hot spot"--执行最频繁的内核代码
+     */
 	profile_init();
 	call_function_init();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
+    /*
+     * 总结：上面是早期启动阶段，在上面的执行过程中，中断是关闭的。 
+     * 输出Linux版本信息（printk(linux_banner)） 
+     * 设置与体系结构相关的环境（setup_arch()） 
+     * 页表结构初始化（paging_init()） 
+     * 设置系统自陷入口（trap_init()） 
+     * 初始化系统IRQ（init_IRQ()） 
+     * 核心进程调度器初始化（sched_init()） 
+     * 时间、定时器初始化（包括读取CMOS时钟、估测主频、初始化定时器中断等，time_init()） 
+     * 提取并分析核心启动参数（从环境变量中读取参数，设置相应标志位等待处理(parse_options())
+     */
 
 	kmem_cache_init_late();
 
@@ -577,9 +624,10 @@ asmlinkage void __init start_kernel(void)
 	 * HACK ALERT! This is early. We're enabling the console before
 	 * we've done PCI setups etc, and console_init() must be aware of
 	 * this. But we do want output early, in case something goes wrong.
+     * 初始化内核显示终端，在这里仅仅进行一些初级的初始化。
 	 */
 	console_init();
-	if (panic_later)
+	if (panic_later)    // 如果这个  panic_later 字符串已经设置了，则停止系统的启动。
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
 
@@ -589,6 +637,7 @@ asmlinkage void __init start_kernel(void)
 	 * Need to run this when irqs are enabled, because it wants
 	 * to self-test [hard/soft]-irqs on/off lock inversion bugs
 	 * too:
+     * 如果没有定义CONFIG_DEBUG_LOCKING_API_SELFTESTS宏,则这个locking_selftest()为空函数
 	 */
 	locking_selftest();
 

@@ -278,6 +278,7 @@ static inline irq_hw_number_t irqd_to_hwirq(struct irq_data *d)
 }
 
 /**
+ * 定义对底层硬件的具体的操作行为
  * struct irq_chip - hardware interrupt chip descriptor
  *
  * @name:		name for /proc/interrupts

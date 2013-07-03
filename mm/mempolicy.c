@@ -2089,13 +2089,14 @@ retry_cpuset:
 /**
  * 	alloc_pages_current - Allocate pages.
  *
- *	@gfp:
+ *	@gfp: 分配标志，如GFP_ATOMIC、GFP_KERNEL等等
  *		%GFP_USER   user allocation,
  *      	%GFP_KERNEL kernel allocation,
  *      	%GFP_HIGHMEM highmem allocation,
  *      	%GFP_FS     don't call back into a file system.
  *      	%GFP_ATOMIC don't sleep.
  *	@order: Power of two of allocation size in pages. 0 is a single page.
+ *          要分配的页面数量为2^order，要分配一个页面，指定order为0.
  *
  *	Allocate a page from the kernel page pool.  When not in
  *	interrupt context and apply the current process NUMA policy.
@@ -2107,19 +2108,32 @@ retry_cpuset:
  */
 struct page *alloc_pages_current(gfp_t gfp, unsigned order)
 {
+    /**
+     * 取当前进程的内存分配策略。
+     * 在支持NUMA的系统中，这个策略可以决定在哪些节点中分配内存。
+     */
 	struct mempolicy *pol = get_task_policy(current);
 	struct page *page;
 	unsigned int cpuset_mems_cookie;
 
+    /**
+     * 如果存在以下情况，就使用系统默认的分配策略:
+     *   进程没有指定特定的分配策略。
+     *   在中断中，由于中断要求快速执行，因此使用默认策略在当前节点中分配内存。
+     *   调用者显示的要求在当前节点中分配内存。
+     */
 	if (!pol || in_interrupt() || (gfp & __GFP_THISNODE))
 		pol = &default_policy;
 
 retry_cpuset:
+    /* 在使用进程分配策略前，必须调用get_mems_allowed，以防止系统修改其值 */
 	cpuset_mems_cookie = get_mems_allowed();
 
 	/*
 	 * No reference counting needed for current->mempolicy
 	 * nor system default_policy
+     * numa_memory_policy.txt描述了内存分配策略，我也不清楚。
+     * 但是最后都会调用__alloc_pages_nodemask，因此我们接下来分析__alloc_pages_nodemask函数
 	 */
 	if (pol->mode == MPOL_INTERLEAVE)
 		page = alloc_page_interleave(gfp, order, interleave_nodes(pol));
@@ -2128,6 +2142,7 @@ retry_cpuset:
 				policy_zonelist(gfp, pol, numa_node_id()),
 				policy_nodemask(gfp, pol));
 
+    /* 允许进行内存策略的修改 */
 	if (unlikely(!put_mems_allowed(cpuset_mems_cookie) && !page))
 		goto retry_cpuset;
 

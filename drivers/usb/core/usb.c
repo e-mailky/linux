@@ -425,6 +425,7 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 		return NULL;
 	}
 
+    //device_initialize 是设备模型里的函数
 	device_initialize(&dev->dev);
 	dev->dev.bus = &usb_bus_type;
 	dev->dev.type = &usb_device_type;

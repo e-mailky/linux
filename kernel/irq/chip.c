@@ -255,6 +255,7 @@ void irq_percpu_disable(struct irq_desc *desc, unsigned int cpu)
 
 static inline void mask_ack_irq(struct irq_desc *desc)
 {
+    // 設置硬體的 mask,並向硬體發送 ACK 
 	if (desc->irq_data.chip->irq_mask_ack)
 		desc->irq_data.chip->irq_mask_ack(&desc->irq_data);
 	else {
@@ -262,6 +263,7 @@ static inline void mask_ack_irq(struct irq_desc *desc)
 		if (desc->irq_data.chip->irq_ack)
 			desc->irq_data.chip->irq_ack(&desc->irq_data);
 	}
+    // 將 irq_desc 的狀態設置為 mask
 	irq_state_set_masked(desc);
 }
 
@@ -398,8 +400,10 @@ void
 handle_level_irq(unsigned int irq, struct irq_desc *desc)
 {
 	raw_spin_lock(&desc->lock);
-	mask_ack_irq(desc);
+    // Level-Triggered Interrups 在處理的時候必須要將其 Mask 掉
+	mask_ack_irq(desc);// 关中断
 
+    // 該 irq 正在被處理，直接退出即可。
 	if (unlikely(irqd_irq_inprogress(&desc->irq_data)))
 		if (!irq_check_poll(desc))
 			goto out_unlock;
@@ -516,6 +520,10 @@ handle_edge_irq(unsigned int irq, struct irq_desc *desc)
 	 */
 	if (unlikely(irqd_irq_disabled(&desc->irq_data) ||
 		     irqd_irq_inprogress(&desc->irq_data) || !desc->action)) {
+        /*
+         * 將這個中斷 mask 掉（這裡的mask是通過irq_chip結構提供的函數在硬體上操作，
+         * 而不是內核中軟體意義上的 mask）
+         */ 
 		if (!irq_check_poll(desc)) {
 			desc->istate |= IRQS_PENDING;
 			mask_ack_irq(desc);
@@ -546,6 +554,11 @@ handle_edge_irq(unsigned int irq, struct irq_desc *desc)
 
 		handle_irq_event(desc);
 
+    /*
+     * 負責處理這個 irq 的 CPU ， 在處理完了一個 IRQ 後，檢查這個 irq_desc 的狀態，
+     * 如果為 PENDING， 則表示在前面的處理過程中又有新的中斷信號產生了，需要繼續處理，
+     * 直到這個 irq_desc 的狀態不是 PENDING 為止 
+     */
 	} while ((desc->istate & IRQS_PENDING) &&
 		 !irqd_irq_disabled(&desc->irq_data));
 
@@ -605,6 +618,7 @@ out_eoi:
  *	@desc:	the interrupt description structure for this irq
  *
  *	Per CPU interrupts on SMP machines without locking requirements
+ *  在中斷處理完成之後向硬體彙報中斷的接收，並調用 EOI 
  */
 void
 handle_percpu_irq(unsigned int irq, struct irq_desc *desc)

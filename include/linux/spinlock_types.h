@@ -20,14 +20,19 @@
 typedef struct raw_spinlock {
 	arch_spinlock_t raw_lock;
 #ifdef CONFIG_GENERIC_LOCKBREAK
-	unsigned int break_lock;
+	unsigned int break_lock;    //表示当前是否有某个核正在申请自旋锁。未配置此选项。
 #endif
 #ifdef CONFIG_DEBUG_SPINLOCK
+    /*
+     * magic是自旋锁的魔法数。当自旋锁结构被意外的修改后，可以被调试代码发现。
+     * owner_cpu是当前获取到锁的CPU编号。如果同一个CPU试图再次获取这个锁，
+     * 内核将输出错误信息。
+     */
 	unsigned int magic, owner_cpu;
-	void *owner;
+	void *owner;    // 当前获取自旋锁的进程task_struct结构。
 #endif
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
-	struct lockdep_map dep_map;
+	struct lockdep_map dep_map; // 用于内存分配调试
 #endif
 } raw_spinlock_t;
 

@@ -523,12 +523,17 @@ static int pfifo_fast_init(struct Qdisc *qdisc, struct nlattr *opt)
 	return 0;
 }
 
+// LINUX下缺省的策略
 struct Qdisc_ops pfifo_fast_ops __read_mostly = {
 	.id		=	"pfifo_fast",
 	.priv_size	=	sizeof(struct pfifo_fast_priv),
-	.enqueue	=	pfifo_fast_enqueue,
-	.dequeue	=	pfifo_fast_dequeue,
-	.peek		=	pfifo_fast_peek,
+	/*
+	 * 如果当前队列中的frame数要小于队列中最大的数，则通过skb->priority算出band，
+	 * 并通过band索引策略的那个队列中，最后加入到队列中。如果超出最大限制，则释放掉skb
+	 */
+    .enqueue	=	pfifo_fast_enqueue,
+	.dequeue	=	pfifo_fast_dequeue, // 则通过priv->bitmap索引数组，队列分别是0到2一次发送出去
+	.peek		=	pfifo_fast_peek,    // 仅仅取出数据，但不从队列中出对
 	.init		=	pfifo_fast_init,
 	.reset		=	pfifo_fast_reset,
 	.dump		=	pfifo_fast_dump,
@@ -711,11 +716,16 @@ static void attach_default_qdiscs(struct net_device *dev)
 
 	txq = netdev_get_tx_queue(dev, 0);
 
+    /*
+     * 单队列，且队列大小为0 则为noqueue_qdisc;
+     * 单队列，单队列大小不为0，则pfifo_fast_ops
+     * 多队列，队列大小为0，则noqueue_qdisc
+     */
 	if (!netif_is_multiqueue(dev) || dev->tx_queue_len == 0) {
 		netdev_for_each_tx_queue(dev, attach_one_default_qdisc, NULL);
 		dev->qdisc = txq->qdisc_sleeping;
 		atomic_inc(&dev->qdisc->refcnt);
-	} else {
+	} else { // 否则为mq_qdisc_ops
 		qdisc = qdisc_create_dflt(txq, &mq_qdisc_ops, TC_H_ROOT);
 		if (qdisc) {
 			dev->qdisc = qdisc;

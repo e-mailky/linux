@@ -171,7 +171,7 @@ extern int _cond_resched(void);
  *
  * This is a useful debugging help to be able to catch problems early and not
  * be bitten later when the calling function happens to sleep when it is not
- * supposed to.
+ * supposed to. 用它来判断一下这个函数是不是处在能够休眠的情况
  */
 # define might_sleep() \
 	do { __might_sleep(__FILE__, __LINE__, 0); might_resched(); } while (0)

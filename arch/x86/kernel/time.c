@@ -56,10 +56,16 @@ EXPORT_SYMBOL(profile_pc);
  */
 static irqreturn_t timer_interrupt(int irq, void *dev_id)
 {
+    /*
+     * 保存着系统中当前正在使用的时钟事件设备（保存了系统当前使用的
+     * 硬件时钟中断发生时，要执行的中断处理函数的指针）。
+     * event_handler==>tick_handle_periodic
+     */
 	global_clock_event->event_handler(global_clock_event);
 	return IRQ_HANDLED;
 }
 
+//irq0便是时钟中断描述符
 static struct irqaction irq0  = {
 	.handler = timer_interrupt,
 	.flags = IRQF_DISABLED | IRQF_NOBALANCING | IRQF_IRQPOLL | IRQF_TIMER,
@@ -68,6 +74,7 @@ static struct irqaction irq0  = {
 
 void __init setup_default_timer_irq(void)
 {
+    //注册时钟中断
 	setup_irq(0, &irq0);
 }
 
@@ -82,6 +89,7 @@ void __init hpet_time_init(void)
 static __init void x86_late_time_init(void)
 {
 	x86_init.timers.timer_init();
+    //初始化时间戳计数器(
 	tsc_init();
 }
 

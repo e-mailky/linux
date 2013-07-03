@@ -63,11 +63,12 @@ static inline void arch_spin_lock(arch_spinlock_t *lock)
 
 	prefetchw(&lock->slock);
 	__asm__ __volatile__(
-"1:	ldrex	%0, [%3]\n"
-"	add	%1, %0, %4\n"
-"	strex	%2, %1, [%3]\n"
-"	teq	%2, #0\n"
-"	bne	1b"
+"1:	ldrex	%0, [%3]\n" /* 将lock字段中的值加载到寄存器 */
+"	add	%1, %0, %4\n"   
+"	strex	%2, %1, [%3]\n" /* 如果lock字段为０，表示锁可用，则将１存入lock字段，表示本CPU已经成功获得锁 */
+        /* 如果lock字段为０，表示我们已经试图向lock字段写入１.这样我们再次将strex指令的结果与０比较，看strex是否成功 */
+"	teq	%2, #0\n"       /* 将寄存器中的值与０比较 */
+"	bne	1b" /* 如果lock字段不为０，或者我们在向lock字段写入１时，与其他核产生了冲突，写入失败，都需要跳转到循环开始处，重新获取锁。 */
 	: "=&r" (lockval), "=&r" (newval), "=&r" (tmp)
 	: "r" (&lock->slock), "I" (1 << TICKET_SHIFT)
 	: "cc");
@@ -77,6 +78,12 @@ static inline void arch_spin_lock(arch_spinlock_t *lock)
 		lockval.tickets.owner = ACCESS_ONCE(lock->tickets.owner);
 	}
 
+    /**
+      * 运行到这里，说明我们已经成功向lock字段写入１，获取锁成功。
+      * 这里用一个smp读写屏障，是为了确保:
+      *   在获得锁以后，看得到前一个锁持有者在释放锁以前对要保护的数据的修改。
+      *   在获得锁以后，对要保护的数据不会先被其他核看到，其他核应当先看到我们对lock字段的修改。
+      */	
 	smp_mb();
 }
 
@@ -108,8 +115,17 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
 
 static inline void arch_spin_unlock(arch_spinlock_t *lock)
 {
+    /**
+     * 这里使用内存屏障的作用是:
+     *   确保在调用spin_unlock之前，我们对要保护的数据的修改，可以早于lock字段之前被其他核看到。
+     *   同时也是一个编译优化屏障，避免编译器将锁保护的代码编译到spin_lock之后。
+     *   按照锁的语义，这里可以只用一个写屏障，但是对A9来说，写屏障也就是一个读写屏障。
+     */    
 	smp_mb();
 	lock->tickets.owner++;
+
+    // 这里再次使用了dsb指令，其实也是一个屏障，即保证其他先看到对锁的修改，
+    // 才能看到释放锁后面的语句的修改。
 	dsb_sev();
 }
 

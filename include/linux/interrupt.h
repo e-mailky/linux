@@ -470,6 +470,9 @@ extern void __tasklet_schedule(struct tasklet_struct *t);
 
 static inline void tasklet_schedule(struct tasklet_struct *t)
 {
+    /*
+     * 原子設置TASKLET_STATE_SCHED，表示任務需要被調度執行。如果還沒有被調度過，
+     * 則調用__tasklet_schedule將它加到本CPU的鏈表中 */
 	if (!test_and_set_bit(TASKLET_STATE_SCHED, &t->state))
 		__tasklet_schedule(t);
 }

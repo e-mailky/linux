@@ -5,18 +5,29 @@
 
 void *kmap(struct page *page)
 {
-	might_sleep();
+    /** 
+     * 调试代码，当打开相关调试选项，并且在不可阻塞上下文(如中断代码中)
+     * 调用此函数时，系统会警告 
+     */
+	might_sleep(); 
+    /* 如果页面不是高端内存，则直接返回其内核线性地址。因为此时不需要进行额外的映射 */
 	if (!PageHighMem(page))
 		return page_address(page);
+    /* 如果是高端内存，则分配一个内核虚拟地址，并建立页表项映射到该物理地址上 */
 	return kmap_high(page);
 }
 EXPORT_SYMBOL(kmap);
 
 void kunmap(struct page *page)
 {
+    /**
+     * 不可能在中断中调用kmap，因此也不可能在中断中解除映射。
+     * 这里用BUG_ON来确保检测是否有这种错误情况出现 
+     */
 	if (in_interrupt())
 		BUG();
-	if (!PageHighMem(page))
+    /* 如果对应页根本就不是高端内存，当然就没有进行内核映射，也就不用调用本函数了*/
+	if (!PageHighMem(page)) 
 		return;
 	kunmap_high(page);
 }
@@ -36,6 +47,11 @@ void *kmap_atomic_prot(struct page *page, pgprot_t prot)
 	int idx, type;
 
 	/* even !CONFIG_PREEMPT needs this, for in_atomic in do_page_fault */
+    /**
+     * 这里其实是禁止抢占: 禁止抢占的目的是为了避免线程飘移到其他核，
+     * 因为后面要使用smp_processor_id确定线程的所在CPU
+     * 不同CPU占用的kmap虚拟地址空间不一样，读者可以认真思考一下为什么需要这样做。
+     */
 	pagefault_disable();
 
 	if (!PageHighMem(page))

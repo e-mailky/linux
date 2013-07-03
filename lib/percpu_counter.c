@@ -76,15 +76,20 @@ void __percpu_counter_add(struct percpu_counter *fbc, s64 amount, s32 batch)
 {
 	s64 count;
 
+    /*
+     * 为了避免当前任务飘移到其他核上，或者被其他核抢占，导致计数丢失
+     * 这里需要关抢占。
+     */
 	preempt_disable();
+    /* 获得本ＣＰＵ计数值并加上计数值。*/	
 	count = __this_cpu_read(*fbc->counters) + amount;
-	if (count >= batch || count <= -batch) {
+	if (count >= batch || count <= -batch) { /* 本次修改的值较大，需要同步到全局计数中 */
 		unsigned long flags;
-		raw_spin_lock_irqsave(&fbc->lock, flags);
-		fbc->count += count;
+		raw_spin_lock_irqsave(&fbc->lock, flags);/* 获得自旋锁，这样可以避免多核同时更新全局计数 */
+		fbc->count += count; /* 修改全局计数，并将本ＣＰＵ计数清0 */
 		__this_cpu_sub(*fbc->counters, count - amount);
 		raw_spin_unlock_irqrestore(&fbc->lock, flags);
-	} else {
+	} else {/* 本次修改的计数较小，仅仅更新本ＣＰＵ计数 */
 		this_cpu_add(*fbc->counters, amount);
 	}
 	preempt_enable();

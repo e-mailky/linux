@@ -103,22 +103,44 @@ struct vm_area_struct;
 #define __GFP_BITS_SHIFT 25	/* Room for N __GFP_FOO bits */
 #define __GFP_BITS_MASK ((__force gfp_t)((1 << __GFP_BITS_SHIFT) - 1))
 
+/* 类似于GFP_ATOMIC，但是没有__GFP_HIGH标志。实际上就是0.
+ * __GFP_HIGH标志表示需要适当降低水线，以使用紧急内存池。*/
 /* This equals 0, but use constants in case they ever change */
 #define GFP_NOWAIT	(GFP_ATOMIC & ~__GFP_HIGH)
 /* GFP_ATOMIC means both !wait (__GFP_WAIT not set) and use emergency pool */
-#define GFP_ATOMIC	(__GFP_HIGH)
+#define GFP_ATOMIC	(__GFP_HIGH)    /* 原子分配。不允许阻塞，同时允许使用紧急内存池。
+                                     * 这个标志主要用于中断上下文 */
+/**
+ * 不允许IO操作。当内存不足时，可能需要将内存换出到外部设备，这需要IO操作。
+ * 但是在进行IO操作的过程，需要申请内存时必须指定此标志，以免死锁。
+ */
 #define GFP_NOIO	(__GFP_WAIT)
+/* 不允许文件系统操作。在文件系统代码中，申请内存需要有此标志。也是为了避免死锁*/
 #define GFP_NOFS	(__GFP_WAIT | __GFP_IO)
+/**
+ * 当内存不足时，允许通过文件系统、IO操作将页面换出以释放内存空间。
+ * 一般的系统调用代码中，都使用此分配标志。
+ * 这也是最常见的分配标志。
+ */
 #define GFP_KERNEL	(__GFP_WAIT | __GFP_IO | __GFP_FS)
+/* 类似于GFP_KERNEL，并且在内存不足时，还允许进行内存回收 */
 #define GFP_TEMPORARY	(__GFP_WAIT | __GFP_IO | __GFP_FS | \
 			 __GFP_RECLAIMABLE)
+/**
+ * 分配用于用户进程的页面。与GFP_KERNEL相比，增加__GFP_HARDWALL。
+ * __GFP_HARDWALL表示可以在进程能够运行的CPU节点上分配内存。
+ */
 #define GFP_USER	(__GFP_WAIT | __GFP_IO | __GFP_FS | __GFP_HARDWALL)
+/* 分配用于用户进程的页面，并且可以在高端内存中分配内存 */
 #define GFP_HIGHUSER	(__GFP_WAIT | __GFP_IO | __GFP_FS | __GFP_HARDWALL | \
 			 __GFP_HIGHMEM)
+/* 类似于GFP_HIGHUSER，__GFP_MOVABLE表示分配的页面可能被迁移以减少内存外碎片。*/
 #define GFP_HIGHUSER_MOVABLE	(__GFP_WAIT | __GFP_IO | __GFP_FS | \
 				 __GFP_HARDWALL | __GFP_HIGHMEM | \
 				 __GFP_MOVABLE)
+/* 如果内存不足，可以通过文件系统和IO操作将页面换出以增加可用内存 */
 #define GFP_IOFS	(__GFP_IO | __GFP_FS)
+/* 分配的页面用于透明巨页 */
 #define GFP_TRANSHUGE	(GFP_HIGHUSER_MOVABLE | __GFP_COMP | \
 			 __GFP_NOMEMALLOC | __GFP_NORETRY | __GFP_NOWARN | \
 			 __GFP_NO_KSWAPD)
@@ -127,6 +149,7 @@ struct vm_area_struct;
  * GFP_THISNODE does not perform any reclaim, you most likely want to
  * use __GFP_THISNODE to allocate from a given node without fallback!
  */
+/* 只允许在当前节点中分配 */
 #ifdef CONFIG_NUMA
 #define GFP_THISNODE	(__GFP_THISNODE | __GFP_NOWARN | __GFP_NORETRY)
 #else
@@ -333,6 +356,10 @@ static inline struct page *alloc_pages_exact_node(int nid, gfp_t gfp_mask,
 #ifdef CONFIG_NUMA
 extern struct page *alloc_pages_current(gfp_t gfp_mask, unsigned order);
 
+/* 
+ * 分配页面的函数是alloc_pages，在NUMA系统中，
+ * 它仅仅是对alloc_pages_current的一个简单封装
+ */
 static inline struct page *
 alloc_pages(gfp_t gfp_mask, unsigned int order)
 {

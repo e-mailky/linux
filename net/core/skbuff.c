@@ -847,6 +847,37 @@ EXPORT_SYMBOL_GPL(skb_copy_ubufs);
  *
  *	If this function is called from an interrupt gfp_mask() must be
  *	%GFP_ATOMIC.
+ *
+ *  新skb_buff结构不加入任何list,也没有引用socket的拥有者,skb->cloned字段在
+ *  克隆和原有的的skb_buff中都置1，但克隆的skb->users=1,使得第一次删除该克隆
+ *  的skb_buff就能成功.但是sk_buff_shinfo->dateref会递增(多了一个skb_buff指向data)
+ *                    
+ *              +┈┈┈┈>+---------+<┈┈┈┈+
+ *              │        | 头空间  |         │  
+ *              │+┈┈┈>+---------+<┈┈┈+ │
+ *              ││      |  数据   |       ││
+ *              ││      |         |       ││
+ *              ││      |         |       ││
+ *              ││+┈┈>+---------+<┈┈+ ││
+ *              │││    |  尾空间 |     │││
+ *              │││+┈>+---------+<┈+ │││
+ *     skb      ││││  |dataref=2|   ││││ skb(cloned)
+ *  +---------+ ││││  |nr_frag=1|   ││││+---------+
+ *  |   ...   | ││││  |  frags  |   ││││|   ...   |  
+ *  |  head---+-+ │││  +---------+   │││+-+--head   |
+ *  |  date---+---+ ││  |         |   ││+---+--date   |
+ *  |  tail---+-----+ │  +---------+   │+-----+--tail   |
+ *  |  end----+-------+   |         |   +-------+--end    |
+ *  +---------+       │  |+-------+|   │      | users=1 |
+ *  skb_shared_info┈-+   ||page---++-+ │      +---------+
+ *                        ||page_of|| │+-------skb_shared_info
+ *                        ||fset=0 || │
+ *                        ||size=S1|| +┈┈┈┈>+---------+---
+ *                        |+-------+|          
+ |  data   | S1
+ *                        +---------+           +---------+---
+ *                                              |  ***    |
+ *                                              +---------+ 
  */
 
 struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)

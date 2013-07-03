@@ -111,7 +111,7 @@ struct nand_ecclayout {
 
 struct module;	/* only needed for owner field in mtd_info */
 
-struct mtd_info {
+struct mtd_info { // MTD原始设备; mtd_info、map_info和cfi_private结构用于描述MTD原始设备
 	u_char type;
 	uint32_t flags;
 	uint64_t size;	 // Total size of the MTD
@@ -245,7 +245,7 @@ struct mtd_info {
 	/* Subpage shift (NAND) */
 	int subpage_sft;
 
-	void *priv;
+	void *priv;     /* 指向一个map_info结构 */
 
 	struct module *owner;
 	struct device dev;

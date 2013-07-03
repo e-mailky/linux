@@ -277,9 +277,9 @@ struct ubuf_info {
  * the end of the header data, ie. at skb->end.
  */
 struct skb_shared_info {
-	unsigned char	nr_frags;
+	unsigned char	nr_frags; //frag_list frags这3个用于处理IP分段
 	__u8		tx_flags;
-	unsigned short	gso_size;
+	unsigned short	gso_size; //so: segmentation offload (主要用于L2 L3 L4) 
 	/* Warning: this field is not always filled in (UFO)! */
 	unsigned short	gso_segs;
 	unsigned short  gso_type;
@@ -290,7 +290,7 @@ struct skb_shared_info {
 	/*
 	 * Warning : all fields before dataref are cleared in __alloc_skb()
 	 */
-	atomic_t	dataref;
+	atomic_t	dataref;    //数据块的"用户"数目
 
 	/* Intermediate layers must ensure that destructor_arg
 	 * remains valid until skb destructor */
@@ -460,7 +460,7 @@ struct sk_buff {
 	__u32			priority;
 	kmemcheck_bitfield_begin(flags1);
 	__u8			local_df:1,
-				cloned:1,
+				cloned:1,       //表示是否克隆出来
 				ip_summed:2,
 				nohdr:1,
 				nfctinfo:3;

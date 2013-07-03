@@ -2794,6 +2794,7 @@ asmlinkage void __sched notrace preempt_schedule(void)
 	/*
 	 * If there is a non-zero preempt_count or interrupts are disabled,
 	 * we do not want to preempt the current task. Just return..
+     * 检查是否允许抢占,本地中断关闭,或者抢占计数器值不为0时不允许抢占
 	 */
 	if (likely(!preemptible()))
 		return;

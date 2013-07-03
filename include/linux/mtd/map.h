@@ -246,7 +246,7 @@ struct map_info {
 	unsigned long map_priv_1;
 	unsigned long map_priv_2;
 	struct device_node *device_node;
-	void *fldrv_priv;
+	void *fldrv_priv;       // 指向一个cfi_private结构
 	struct mtd_chip_driver *fldrv;
 };
 

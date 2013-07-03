@@ -142,6 +142,11 @@ EXPORT_SYMBOL(_local_bh_enable);
 
 void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
 {
+    /*
+     * 在中斷上下文，是不需要禁止和打開軟中斷的。
+     * 在中斷被禁止時，也不需要禁止和打開軟中斷。
+     * 這兩種情況下，都給出警告，可能是用法錯誤
+     */
 	WARN_ON_ONCE(in_irq() || irqs_disabled());
 #ifdef CONFIG_TRACE_IRQFLAGS
 	local_irq_disable();
@@ -157,6 +162,9 @@ void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
 	 */
 	preempt_count_sub(cnt - 1);
 
+    /* 不在中斷，也不在軟中斷上下文，並且有掛起的中斷，才處理掛起的軟中斷。
+     * 注意，此時的執行上下文是在線程上下文，中斷是打開的，因此調用do_softirq而不是__do_softirq
+     */
 	if (unlikely(!in_interrupt() && local_softirq_pending())) {
 		/*
 		 * Run softirq if any pending. And do it in its own stack
@@ -165,6 +173,10 @@ void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
 		do_softirq();
 	}
 
+    /*
+     * 由於打開了CONFIG_TRACE_IRQFLAGS時，此時處於關中斷狀態。打開搶佔不能進行搶佔調度。
+     * 因此，此時先減少搶佔計數，待中斷打開後再判斷是否需要處理搶佔
+     */
 	preempt_count_dec();
 #ifdef CONFIG_TRACE_IRQFLAGS
 	local_irq_enable();
@@ -224,6 +236,12 @@ static inline void lockdep_softirq_end(bool in_hardirq) { }
 
 asmlinkage void __do_softirq(void)
 {
+    /*
+     * 在一次調用__do_softirq的過程中，最多循環處理2ms(10次)的軟中斷。
+     * 這樣做的目的是為了避免軟中斷大量佔用CPU，導致應用程序被餓死。
+     * 實際上，這樣做達不到目的。要完全避免餓死應用程序，還是需要軟中斷線程化。
+     * 當然，這裡的判斷應當是歷史原因。	int max_restart = MAX_SOFTIRQ_RESTART;
+     */
 	unsigned long end = jiffies + MAX_SOFTIRQ_TIME;
 	unsigned long old_flags = current->flags;
 	int max_restart = MAX_SOFTIRQ_RESTART;
@@ -240,59 +258,119 @@ asmlinkage void __do_softirq(void)
 	 */
 	current->flags &= ~PF_MEMALLOC;
 
+    // 得到當前掛起軟中斷掩碼。注意當前仍然是關中斷狀態，可以安全的獲得掩碼。
 	pending = local_softirq_pending();
 	account_irq_enter_time(current);
 
+    //屏蔽其他软中断，所以软中断仅仅能一个在执行。發生中斷後不會再重入本函數
 	__local_bh_disable_ip(_RET_IP_, SOFTIRQ_OFFSET);
 	in_hardirq = lockdep_softirq_start();
 
 	cpu = smp_processor_id();
 restart:
 	/* Reset the pending bitmask before enabling irqs */
+    // 每次循环在允许硬件 ISR 强占前，首先重置软中断的标志位。
 	set_softirq_pending(0);
 
 	local_irq_enable();
 
-	h = softirq_vec;
+    /*
+     * 这里要注意，以下代码运行时可以被硬件中断抢占，但这个硬件 ISR 执行完成后，
+     * 它的所注册的软中断无法马上运行，别忘了，现在虽是开硬件中断执行，但前面的
+     * __local_bh_disable()函数屏蔽了软中断。所以这种环境下只能被硬件中断抢占，
+     * 但这个硬中断注册的软中断回调函数无法运行。要问为什么，那是因为__local_bh_disable()
+     * 函数设置了一个标志当作互斥量，而这个标志正是上面的 irq_exit() 和 do_softirq()
+     * 函数中的in_interrupt() 函数判断的条件之一，也就是说 in_interrupt()函数
+     * 不仅检测硬中断而且还判断了软中断。所以在这个环境下触发硬中断时注册的软中断，
+     * 根本无法重新进入到这个函数中来，只能是做一个标志，等待下面的重复循环
+     *（最大 MAX_SOFTIRQ_RESTART）才可能处理到这个时候触发的硬件中断所注册的软中断。
+     */
+	h = softirq_vec;    // 得到软中断向量表
 
-	while ((softirq_bit = ffs(pending))) {
+    // 循环处理所有 softirq 软中断注册函数。
+	while ((softirq_bit = ffs(pending))) { //如果对应的软中断设置 pending 标志则表明需要进一步处理它所注册的函数
 		unsigned int vec_nr;
 		int prev_count;
 
 		h += softirq_bit - 1;
 
 		vec_nr = h - softirq_vec;
+        // 在調用軟中斷處理函數前，保存搶佔計數。避免軟中斷函數破壞計數。
 		prev_count = preempt_count();
 
 		kstat_incr_softirqs_this_cpu(vec_nr);
 
 		trace_softirq_entry(vec_nr);
+        // 在这里执行了这个软中断所注册的回调函数
 		h->action(h);
 		trace_softirq_exit(vec_nr);
-		if (unlikely(prev_count != preempt_count())) {
+		/*
+        * 軟中斷回調函數破壞了搶佔計數。這裡打印最高級別的警告
+        * 並恢復正確的搶佔計數
+        */
+        if (unlikely(prev_count != preempt_count())) {
 			pr_err("huh, entered softirq %u %s %p with preempt_count %08x, exited with %08x?\n",
 			       vec_nr, softirq_to_name[vec_nr], h->action,
 			       prev_count, preempt_count());
 			preempt_count_set(prev_count);
 		}
+        /* 這裡是處理下半部分RCU靜止狀態 */
 		rcu_bh_qs(cpu);
 		h++;
 		pending >>= softirq_bit;
 	}
 
+    /*
+     * 关中断执行以下代码。注意：这里又关中断了，下面的代码执行过程中硬件中断无法抢占。
+     * 前面提到过，在刚才开硬件中断执行环境时只能被硬件中断抢占，在这个时候是
+     * 无法处理软中断的，因为刚才开中断执行过程中可能多次被硬件中断抢占，
+     * 每抢占一次就有可能注册一个软中断，所以要再重新取一次所有的软中断。
+     * 以便下面的代码进行处理后跳回到 restart 处重复执行。
+     */
 	local_irq_disable();
 
+    /*
+     * 如果在上面的开中断执行环境中触发了硬件中断，且每个都注册了一个软中断的话，
+     * 这个软中断会设置 pending 位,但在当前一直屏蔽软中断的环境下无法得到执行，
+     * 前面提到过，因为 irq_exit() 和 do_softirq() 根本无法进入到这个处理过程中来。
+     * 这个在上面详细的记录过了。那么在这里又有了一个执行的机会。
+     * 注意：虽然当前环境一直是处于屏蔽软中断执行的环境中，但在这里又给出了
+     * 一个执行刚才在开中断环境过程中触发硬件中断时所注册的软中断的机会，
+     * 其实只要理解了软中断机制就会知道，无非是在一些特定环境下调用 ISR 注册到
+     * 软中断向量表里的函数而已。如果刚才触发的硬件中断注册了软中断，并且重复执行
+     * 次数没有到 10 次的话，那么则跳转到 restart 标志处重复以上所介绍的所有步骤：
+     * 设置软中断标志位，重新开中断执行...
+     * 注意：这里是要两个条件都满足的情况下才可能重复以上步骤。
+     */
 	pending = local_softirq_pending();
 	if (pending) {
 		if (time_before(jiffies, end) && !need_resched() &&
 		    --max_restart)
 			goto restart;
 
+        /*
+         * 如果以上步骤重复了 10 次后还有 pending 的软中断的话，那么系统在一定时间内
+         * 可能达到了一个峰值，为了平衡这点。系统专门建立了一个 ksoftirqd 线程来处理，
+         * 这样避免在一定时间内负荷太大。这个 ksoftirqd 线程本身是一个大循环，
+         * 在某些条件下为了不负载过重，它是可以被其他进程抢占的，但注意，它是显示的调用了
+         * preempt_xxx() 和 schedule()才会被抢占和切换的。这么做的原因是因为在它一旦调用
+         * local_softirq_pending() 函数检测到有 pending 的软中断需要处理的时候，
+         * 则会显示的调用 do_softirq() 来处理软中断。也就是说，下面代码唤醒的 ksoftirqd
+         * 线程有可能会回到这个函数当中来，尤其是在系统需要响应很多软中断的情况下，
+         * 它的调用入口是 do_softirq()，这也就是为什么在 do_softirq()的入口处也会用
+         * in_interrupt()函数来判断是否有软中断正在处理的原因了，目的还是为了防止重入。
+         * ksoftirqd 实现看下面对 ksoftirqd() 函数的分析。
+         */
+        // 此函数实际是调用 wake_up_process() 来唤醒 ksoftirqd
 		wakeup_softirqd();
 	}
 
 	lockdep_softirq_end(in_hardirq);
 	account_irq_exit_time(current);
+    /*
+     * 到最后才开软中断执行环境，允许软中断执行。注意：这里 使用的不是
+     * local_bh_enable()，不会再次触发 do_softirq()的调用。
+     */
 	__local_bh_enable(SOFTIRQ_OFFSET);
 	WARN_ON_ONCE(in_interrupt());
 	tsk_restore_flags(current, old_flags, PF_MEMALLOC);
@@ -303,11 +381,17 @@ asmlinkage void do_softirq(void)
 	__u32 pending;
 	unsigned long flags;
 
+    /*
+     * 这个函数判断，如果当前有硬件中断嵌套，或者有软中断正在执行时候，
+     * 则马上返回。在这个入口判断主要是为了与 ksoftirqd 互斥。
+     */
 	if (in_interrupt())
 		return;
 
+    // 关中断执行以下代码
 	local_irq_save(flags);
 
+    //判断是否有softirq pending
 	pending = local_softirq_pending();
 
 	if (pending)
@@ -337,7 +421,7 @@ void irq_enter(void)
 
 static inline void invoke_softirq(void)
 {
-	if (!force_irqthreads) {
+	if (!force_irqthreads) { /*沒有強制進行中斷線程化*/
 #ifdef CONFIG_HAVE_IRQ_EXIT_ON_IRQ_STACK
 		/*
 		 * We can safely execute softirq on the current stack if
@@ -353,8 +437,8 @@ static inline void invoke_softirq(void)
 		 */
 		do_softirq_own_stack();
 #endif
-	} else {
-		wakeup_softirqd();
+	} else { /* 中斷線程化了，軟中斷統一在線程上下文處理 */
+		wakeup_softirqd();// 喚醒本CPU上的softirqd守護線程。由該線程處理掛起的軟中斷。
 	}
 }
 
@@ -388,7 +472,7 @@ void irq_exit(void)
 		invoke_softirq();
 
 	tick_irq_exit();
-	rcu_irq_exit();
+	rcu_irq_exit(); /* 在汇编中判断是否需要调度 */
 	trace_hardirq_exit(); /* must be last! */
 }
 
@@ -447,6 +531,7 @@ void __tasklet_schedule(struct tasklet_struct *t)
 {
 	unsigned long flags;
 
+    // 禁止中斷，這樣可以避免與軟中斷衝突
 	local_irq_save(flags);
 	t->next = NULL;
 	*__this_cpu_read(tasklet_vec.tail) = t;
@@ -483,8 +568,11 @@ static void tasklet_action(struct softirq_action *a)
 {
 	struct tasklet_struct *list;
 
+    //由於中斷可能註冊tasklet，因此，在獲取待處理的tasklet鏈表時，需要關閉中斷。
 	local_irq_disable();
+    //把tasklet_vec[n]（n为cpu号）指向的链表的地址存入局部变量list
 	list = __this_cpu_read(tasklet_vec.head);
+    //把tasklet_vec[n]（n为cpu号）的值设定为NULL，因此已经调度的tasklet描述符的链表被清空。
 	__this_cpu_write(tasklet_vec.head, NULL);
 	__this_cpu_write(tasklet_vec.tail, &__get_cpu_var(tasklet_vec).head);
 	local_irq_enable();
@@ -494,8 +582,13 @@ static void tasklet_action(struct softirq_action *a)
 
 		list = list->next;
 
+        /* 其他核上的中斷可能會調度一個tasklet開始運行。因此這裡試圖獲得它的鎖再執行其他回調
+         * 查看count字段，检查tasklet是否被禁止，如果是，就清 TASKLET_STATE_SCHED
+         * 同时执行tasklet函数
+         */
 		if (tasklet_trylock(t)) {
-			if (!atomic_read(&t->count)) {
+			if (!atomic_read(&t->count)) {/* 沒有禁止該tasklet */
+                /* 任務沒有被禁止，又沒有被調度，但是又在鏈表中，是不正常的 */
 				if (!test_and_clear_bit(TASKLET_STATE_SCHED,
 							&t->state))
 					BUG();
@@ -506,10 +599,15 @@ static void tasklet_action(struct softirq_action *a)
 			tasklet_unlock(t);
 		}
 
-		local_irq_disable();
+        /*
+         * 運行到里，說明不能獲得任務鎖，或者其他核在操作任務，
+         * 因此需要將任務放回鏈表。在放回前，需要關中斷以保護鏈表。
+         */
+        local_irq_disable();
 		t->next = NULL;
 		*__this_cpu_read(tasklet_vec.tail) = t;
 		__this_cpu_write(tasklet_vec.tail, &(t->next));
+        /* 觸發TASKLET_SOFTIRQ，這樣，在do_softirq的下一輪將會處理該任務 */
 		__raise_softirq_irqoff(TASKLET_SOFTIRQ);
 		local_irq_enable();
 	}

@@ -355,6 +355,7 @@ struct ohci_hcd {
 
 	/*
 	 * I/O memory used to communicate with the HC (dma-consistent)
+     *  与主机控制器通信的IO内存(DMA 一致)
 	 */
 	struct ohci_regs __iomem *regs;
 
@@ -362,11 +363,12 @@ struct ohci_hcd {
 	 * main memory used to communicate with the HC (dma-consistent).
 	 * hcd adds to schedule for a live hc any time, but removals finish
 	 * only at the start of the next frame.
+     * 与主机控制器通信的主存(DMA 一致)
 	 */
 	struct ohci_hcca	*hcca;
 	dma_addr_t		hcca_dma;
 
-	struct ed		*ed_rm_list;		/* to be removed */
+	struct ed		*ed_rm_list;		/* to be removed 将移除的OHCI Endpoint Descriptor (ED)*/
 
 	struct ed		*ed_bulktail;		/* last in bulk list */
 	struct ed		*ed_controltail;	/* last in ctrl list */
@@ -375,7 +377,7 @@ struct ohci_hcd {
 	void (*start_hnp)(struct ohci_hcd *ohci);
 
 	/*
-	 * memory management for queue data structures
+	 * memory management for queue data structures  队列数据的内存管理
 	 */
 	struct dma_pool		*td_cache;
 	struct dma_pool		*ed_cache;
@@ -388,7 +390,7 @@ struct ohci_hcd {
 	enum ohci_rh_state	rh_state;
 	int			num_ports;
 	int			load [NUM_INTS];
-	u32			hc_control;	/* copy of hc control reg */
+	u32			hc_control;	/* copy of hc control reg 主机控制器控制寄存器的复制*/
 	unsigned long		next_statechange;	/* suspend/resume */
 	u32			fminterval;		/* saved register */
 	unsigned		autostop:1;	/* rh auto stopping/stopped */

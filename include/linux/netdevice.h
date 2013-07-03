@@ -1179,7 +1179,7 @@ struct net_device {
 	unsigned long		mem_end;	/* shared mem end	*/
 	unsigned long		mem_start;	/* shared mem start	*/
 	unsigned long		base_addr;	/* device I/O address	*/
-	int			irq;		/* device IRQ number	*/
+	int			irq;		/* device IRQ number	可由多个设备共享*/
 
 	/*
 	 *	Some hardware also needs these fields, but they are not
@@ -1247,7 +1247,7 @@ struct net_device {
 	/* Hardware header description */
 	const struct header_ops *header_ops;
 
-	unsigned int		flags;	/* interface flags (a la BSD)	*/
+	unsigned int		flags;	/* interface flags (a la BSD)一些bit表示功能,一些bit表示状态改变*/
 	unsigned int		priv_flags; /* Like 'flags' but invisible to userspace.
 					     * See if.h for definitions. */
 	unsigned short		gflags;

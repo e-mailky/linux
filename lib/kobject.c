@@ -378,6 +378,7 @@ static int kobject_add_varg(struct kobject *kobj, struct kobject *parent,
  * up all of the necessary sysfs files for the object and then call
  * kobject_uevent() with the UEVENT_ADD parameter to ensure that
  * userspace is properly notified of this kobject's creation.
+ * 将Kobject对象注册到linux系统，如果失败则返回一个错误码
  */
 int kobject_add(struct kobject *kobj, struct kobject *parent,
 		const char *fmt, ...)
@@ -413,6 +414,11 @@ EXPORT_SYMBOL(kobject_add);
  * This function combines the call to kobject_init() and
  * kobject_add().  The same type of error handling after a call to
  * kobject_add() and kobject lifetime rules are the same here.
+ *
+ * 初始化并注册kobject，kobject传入要初始化的Kobject对象，ktype将在后面介绍到，
+ * parent指向上级的kobject对象，如果指定位NULL，将在/sys的顶层创建一个目录。
+ * *fmt为kobject对象的名字。kobject的ktype对象是一个指向kobject_type结构的指针，
+ * 该结构记录了kobject对象的一些属性。每个kobject都需要对应一个相应的kobject结构
  */
 int kobject_init_and_add(struct kobject *kobj, struct kobj_type *ktype,
 			 struct kobject *parent, const char *fmt, ...)
