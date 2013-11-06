@@ -121,12 +121,14 @@ void panic(const char *fmt, ...)
 	 * unfortunately means it may not be hardened to work in a panic
 	 * situation.
 	 */
+    //要求别的cpu执行halt，实际上就是停止了别的cpu，而本cpu即导致panic的cpu最终将死循环。
 	smp_send_stop();
 
 	/*
 	 * Run any panic handlers, including those that might need to
 	 * add information to the kmsg dump output.
 	 */
+    //处理panic通知链，做好善后工作
 	atomic_notifier_call_chain(&panic_notifier_list, 0, buf);
 
 	kmsg_dump(KMSG_DUMP_PANIC);
@@ -136,7 +138,7 @@ void panic(const char *fmt, ...)
 	if (!panic_blink)
 		panic_blink = no_blink;
 
-	if (panic_timeout > 0) {
+	if (panic_timeout > 0) {//重启延时如果不为0则倒计时重启
 		/*
 		 * Delay timeout seconds before rebooting the machine.
 		 * We can't use the "normal" timers since we just panicked.

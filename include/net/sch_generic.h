@@ -75,14 +75,14 @@ struct Qdisc {
 	struct Qdisc		*__parent;
 	struct netdev_queue	*dev_queue;
 
-	struct gnet_stats_rate_est64	rate_est;
+	struct gnet_stats_rate_est64	rate_est;   // 速率估计
 	struct Qdisc		*next_sched;
 	struct sk_buff		*gso_skb;
 	/*
 	 * For performance sake on SMP, we put highly modified fields at the end
 	 */
 	unsigned long		state;
-	struct sk_buff_head	q;
+	struct sk_buff_head	q;      // 数据包链表头
 	struct gnet_stats_basic_packed bstats;
 	unsigned int		__state;
 	struct gnet_stats_queue	qstats;
@@ -129,24 +129,24 @@ static inline void qdisc_unthrottled(struct Qdisc *qdisc)
 struct Qdisc_class_ops {
 	/* Child qdisc manipulation */
 	struct netdev_queue *	(*select_queue)(struct Qdisc *, struct tcmsg *);
-	int			(*graft)(struct Qdisc *, unsigned long cl,
+	int			(*graft)(struct Qdisc *, unsigned long cl,      // 减子节点
 					struct Qdisc *, struct Qdisc **);
-	struct Qdisc *		(*leaf)(struct Qdisc *, unsigned long cl);
+	struct Qdisc *		(*leaf)(struct Qdisc *, unsigned long cl);// 增加子节点
 	void			(*qlen_notify)(struct Qdisc *, unsigned long);
 
 	/* Class manipulation routines */
-	unsigned long		(*get)(struct Qdisc *, u32 classid);
-	void			(*put)(struct Qdisc *, unsigned long);
+	unsigned long		(*get)(struct Qdisc *, u32 classid);// 获取, 增加使用计数
+	void			(*put)(struct Qdisc *, unsigned long);  // 释放, 减少使用计数
 	int			(*change)(struct Qdisc *, u32, u32,
 					struct nlattr **, unsigned long *);
 	int			(*delete)(struct Qdisc *, unsigned long);
-	void			(*walk)(struct Qdisc *, struct qdisc_walker * arg);
+	void			(*walk)(struct Qdisc *, struct qdisc_walker * arg); // 遍历
 
 	/* Filter manipulation */
 	struct tcf_proto **	(*tcf_chain)(struct Qdisc *, unsigned long);
-	unsigned long		(*bind_tcf)(struct Qdisc *, unsigned long,
+	unsigned long		(*bind_tcf)(struct Qdisc *, unsigned long,  // tc捆绑
 					u32 classid);
-	void			(*unbind_tcf)(struct Qdisc *, unsigned long);
+	void			(*unbind_tcf)(struct Qdisc *, unsigned long);   // tc解除
 
 	/* rtnetlink specific */
 	int			(*dump)(struct Qdisc *, unsigned long,
@@ -161,8 +161,8 @@ struct Qdisc_class_ops {
  */
 struct Qdisc_ops {
 	struct Qdisc_ops	*next;
-	const struct Qdisc_class_ops	*cl_ops;
-	char			id[IFNAMSIZ];
+	const struct Qdisc_class_ops	*cl_ops;    // 类别操作结构
+	char			id[IFNAMSIZ];   // Qdisc的名称, 从数组大小看应该就是网卡名称
 	int			priv_size;
 
 	int 			(*enqueue)(struct sk_buff *, struct Qdisc *);
@@ -171,9 +171,9 @@ struct Qdisc_ops {
 	unsigned int		(*drop)(struct Qdisc *);
 
 	int			(*init)(struct Qdisc *, struct nlattr *arg);
-	void			(*reset)(struct Qdisc *);
+	void			(*reset)(struct Qdisc *);// 复位为初始状态,释放缓冲,删除定时器,清空计数器
 	void			(*destroy)(struct Qdisc *);
-	int			(*change)(struct Qdisc *, struct nlattr *arg);
+	int			(*change)(struct Qdisc *, struct nlattr *arg);// 更改Qdisc参数
 	void			(*attach)(struct Qdisc *);
 
 	int			(*dump)(struct Qdisc *, struct sk_buff *);
@@ -498,11 +498,13 @@ static inline int __qdisc_enqueue_tail(struct sk_buff *skb, struct Qdisc *sch,
 				       struct sk_buff_head *list)
 {
 	__skb_queue_tail(list, skb);
+    // 更新统计信息,当前队列中数据包的数据长度增加
 	sch->qstats.backlog += qdisc_pkt_len(skb);
 
 	return NET_XMIT_SUCCESS;
 }
 
+// 将skb包添加到数据队列最后
 static inline int qdisc_enqueue_tail(struct sk_buff *skb, struct Qdisc *sch)
 {
 	return __qdisc_enqueue_tail(skb, sch, &sch->q);
@@ -514,6 +516,7 @@ static inline struct sk_buff *__qdisc_dequeue_head(struct Qdisc *sch,
 	struct sk_buff *skb = __skb_dequeue(list);
 
 	if (likely(skb != NULL)) {
+        // 减少当前数据队列数据长度计数
 		sch->qstats.backlog -= qdisc_pkt_len(skb);
 		qdisc_bstats_update(sch, skb);
 	}
@@ -521,6 +524,7 @@ static inline struct sk_buff *__qdisc_dequeue_head(struct Qdisc *sch,
 	return skb;
 }
 
+// 将队列头的数据包出队列
 static inline struct sk_buff *qdisc_dequeue_head(struct Qdisc *sch)
 {
 	return __qdisc_dequeue_head(sch, &sch->q);
@@ -546,6 +550,7 @@ static inline unsigned int qdisc_queue_drop_head(struct Qdisc *sch)
 	return __qdisc_queue_drop_head(sch, &sch->q);
 }
 
+// 将队列尾的数据包出队列
 static inline struct sk_buff *__qdisc_dequeue_tail(struct Qdisc *sch,
 						   struct sk_buff_head *list)
 {
@@ -612,6 +617,7 @@ static inline void qdisc_reset_queue(struct Qdisc *sch)
 	sch->qstats.backlog = 0;
 }
 
+// 丢弃Qdisc数据队列尾的数据包
 static inline unsigned int __qdisc_queue_drop(struct Qdisc *sch,
 					      struct sk_buff_head *list)
 {
@@ -631,6 +637,7 @@ static inline unsigned int qdisc_queue_drop(struct Qdisc *sch)
 	return __qdisc_queue_drop(sch, &sch->q);
 }
 
+// 丢弃数据包
 static inline int qdisc_drop(struct sk_buff *skb, struct Qdisc *sch)
 {
 	kfree_skb(skb);
@@ -639,6 +646,7 @@ static inline int qdisc_drop(struct sk_buff *skb, struct Qdisc *sch)
 	return NET_XMIT_DROP;
 }
 
+// 整形失败丢包
 static inline int qdisc_reshape_fail(struct sk_buff *skb, struct Qdisc *sch)
 {
 	sch->qstats.drops++;

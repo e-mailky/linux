@@ -162,6 +162,7 @@ static int int_max = INT_MAX;
 
 static struct ctl_table ipc_kern_table[] = {
 	{
+        /* 该参数定义了共享内存段的最大尺寸（以字节为单位）。缺省为32M */
 		.procname	= "shmmax",
 		.data		= &init_ipc_ns.shm_ctlmax,
 		.maxlen		= sizeof(init_ipc_ns.shm_ctlmax),
@@ -169,6 +170,7 @@ static struct ctl_table ipc_kern_table[] = {
 		.proc_handler	= proc_ipc_doulongvec_minmax,
 	},
 	{
+        /* 该参数表示系统一次可以使用的共享内存总量（以页为单位）。缺省值就是2097152，通常不需要修改 */
 		.procname	= "shmall",
 		.data		= &init_ipc_ns.shm_ctlall,
 		.maxlen		= sizeof(init_ipc_ns.shm_ctlall),
@@ -176,6 +178,7 @@ static struct ctl_table ipc_kern_table[] = {
 		.proc_handler	= proc_ipc_doulongvec_minmax,
 	},
 	{
+        /* 这个内核参数用于设置系统范围内共享内存段的最大数量。该参数的默认值是 4096 。通常不需要更改 */
 		.procname	= "shmmni",
 		.data		= &init_ipc_ns.shm_ctlmni,
 		.maxlen		= sizeof(init_ipc_ns.shm_ctlmni),
@@ -219,7 +222,7 @@ static struct ctl_table ipc_kern_table[] = {
 		.extra2		= &int_max,
 	},
 	{
-		.procname	= "sem",
+		.procname	= "sem",    /* 表示设置的信号量 */
 		.data		= &init_ipc_ns.sem_ctls,
 		.maxlen		= 4*sizeof(int),
 		.mode		= 0644,

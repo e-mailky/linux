@@ -2742,13 +2742,13 @@ static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 		rc = NET_XMIT_SUCCESS;
 	} else {
 		skb_dst_force(skb);
-		rc = q->enqueue(skb, q) & NET_XMIT_MASK;
+		rc = q->enqueue(skb, q) & NET_XMIT_MASK; // 入队处理
 		if (qdisc_run_begin(q)) {
 			if (unlikely(contended)) {
 				spin_unlock(&q->busylock);
 				contended = false;
 			}
-			__qdisc_run(q);
+			__qdisc_run(q);// 运行流控, 出队列操作
 		}
 	}
 	spin_unlock(root_lock);
@@ -2842,6 +2842,8 @@ static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
 	skb->tc_verd = SET_TC_AT(skb->tc_verd, AT_EGRESS);
 #endif
 	trace_net_dev_queue(skb);
+    /* 如果队列输入非空, 将数据包入队 
+    * 对于物理网卡设备, 缺省使用的是FIFO qdisc, 该成员函数非空, 只有逻辑网卡才可能为空 */
 	if (q->enqueue) {// 如果有enqueue则说明进行流控，否则直接发送
 		rc = __dev_xmit_skb(skb, q, dev, txq);
 		goto out;

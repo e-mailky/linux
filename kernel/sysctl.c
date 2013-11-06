@@ -1522,6 +1522,7 @@ static struct ctl_table fs_table[] = {
 		.proc_handler	= proc_nr_files,
 	},
 	{
+        /* 表示文件句柄的最大数量。文件句柄设置表示在linux系统中可以打开的文件数量 */
 		.procname	= "file-max",
 		.data		= &files_stat.max_files,
 		.maxlen		= sizeof(files_stat.max_files),

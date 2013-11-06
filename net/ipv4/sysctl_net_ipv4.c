@@ -337,6 +337,7 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+        /* 表示当keepalive起用的时候，TCP发送keepalive消息的频度。缺省是2小时，改为20分钟 */
 		.procname	= "tcp_keepalive_time",
 		.data		= &sysctl_tcp_keepalive_time,
 		.maxlen		= sizeof(int),
@@ -373,6 +374,7 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+        /* 如果套接字由本端要求关闭，这个参数决定了它保持在FIN-WAIT-2状态的时间 */
 		.procname	= "tcp_fin_timeout",
 		.data		= &sysctl_tcp_fin_timeout,
 		.maxlen		= sizeof(int),
@@ -381,6 +383,7 @@ static struct ctl_table ipv4_table[] = {
 	},
 #ifdef CONFIG_SYN_COOKIES
 	{
+        /* 开启SYN Cookies。当出现SYN等待队列溢出时，启用cookies来处理，可防范少量SYN攻击，默认为0，表示关闭 */
 		.procname	= "tcp_syncookies",
 		.data		= &sysctl_tcp_syncookies,
 		.maxlen		= sizeof(int),
@@ -402,6 +405,7 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_tcp_fastopen_key,
 	},
 	{
+        /* 开启TCP连接中TIME-WAIT sockets的快速回收，默认为0，表示关闭 */
 		.procname	= "tcp_tw_recycle",
 		.data		= &tcp_death_row.sysctl_tw_recycle,
 		.maxlen		= sizeof(int),
@@ -430,6 +434,7 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+        /* 表示SYN队列的长度，默认为1024，加大队列长度为8192，可以容纳更多等待连接的网络连接数 */
 		.procname	= "tcp_max_syn_backlog",
 		.data		= &sysctl_max_syn_backlog,
 		.maxlen		= sizeof(int),
@@ -553,6 +558,7 @@ static struct ctl_table ipv4_table[] = {
 		.extra2		= &tcp_adv_win_scale_max,
 	},
 	{
+        /* 开启重用。允许将TIME-WAIT sockets重新用于新的TCP连接，默认为0，表示关闭 */
 		.procname	= "tcp_tw_reuse",
 		.data		= &sysctl_tcp_tw_reuse,
 		.maxlen		= sizeof(int),

@@ -58,24 +58,24 @@ start2:
 	movw	%ax, %ss
 	xorw	%sp, %sp
 	sti
-	cld
+	cld		#清方向位，在执行串操作时，使地址按递增的方式变化
 
 	movw	$bugger_off_msg, %si
 
 msg_loop:
-	lodsb
+	lodsb	#取一字节到%al
 	andb	%al, %al
 	jz	bs_die
-	movb	$0xe, %ah
-	movw	$7, %bx
+	movb	$0xe, %ah	#执行显示服务中断(INT 10H)的第14号功能:在Teletype模式下显示字符
+	movw	$7, %bx		#设置前景色即字符颜色;白色
 	int	$0x10
 	jmp	msg_loop
 
 bs_die:
 	# Allow the user to press a key, then reboot
-	xorw	%ax, %ax
-	int	$0x16
-	int	$0x19
+	xorw	%ax, %ax	# 置%ax的值为0
+	int	$0x16			#调用键盘服务(INT 16H)的00H号功能：从键盘读入字符
+	int	$0x19			#调用系统服务的19H号中断：重启系统
 
 	# int 0x19 should never return.  In case it does anyway,
 	# invoke the BIOS reset code...
@@ -259,9 +259,9 @@ section_table:
 	.globl	sentinel
 sentinel:	.byte 0xff, 0xff        /* Used to detect broken loaders */
 
-	.globl	hdr
+	.globl	hdr			/* 传递给内核的部分setup_header的字段 */ 
 hdr:
-setup_sects:	.byte 0			/* Filled in by build.c */
+setup_sects:	.byte 0			/* Filled in by build.c 该扇区之后的实模式代码占用几个扇区 */
 root_flags:	.word ROOT_RDONLY
 syssize:	.long 0			/* Filled in by build.c */
 ram_size:	.word 0			/* Obsolete */
@@ -269,7 +269,7 @@ vid_mode:	.word SVGA_MODE
 root_dev:	.word 0			/* Filled in by build.c */
 boot_flag:	.word 0xAA55
 
-	# offset 512, entry point
+	# offset 512, entry point 从偏移地址为512处作为程序的入口点
 
 	.globl	_start
 _start:

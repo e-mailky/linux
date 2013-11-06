@@ -264,6 +264,7 @@ static struct Qdisc *qdisc_match_from_root(struct Qdisc *root, u32 handle)
 	    root->handle == handle)
 		return root;
 
+    // 遍历dev设备Qdisc链表
 	list_for_each_entry(q, &root->list, list) {
 		if (q->handle == handle)
 			return q;
@@ -289,6 +290,7 @@ void qdisc_list_del(struct Qdisc *q)
 }
 EXPORT_SYMBOL(qdisc_list_del);
 
+// 根据句柄查找Qdisc, 句柄是个32位整数用于标识Qdisc的
 struct Qdisc *qdisc_lookup(struct net_device *dev, u32 handle)
 {
 	struct Qdisc *q;
@@ -305,19 +307,20 @@ out:
 	return q;
 }
 
+// 返回指定类别的Qdisc叶节点
 static struct Qdisc *qdisc_leaf(struct Qdisc *p, u32 classid)
 {
 	unsigned long cl;
 	struct Qdisc *leaf;
-	const struct Qdisc_class_ops *cops = p->ops->cl_ops;
+	const struct Qdisc_class_ops *cops = p->ops->cl_ops;// Qdisc类别操作
 
 	if (cops == NULL)
 		return NULL;
-	cl = cops->get(p, classid);
+	cl = cops->get(p, classid);// 获取指定classid类型的类别句柄
 
 	if (cl == 0)
 		return NULL;
-	leaf = cops->leaf(p, cl);
+	leaf = cops->leaf(p, cl);// 调用类别操作结构的left成员函数获取叶Qdisc节点
 	cops->put(p, cl);
 	return leaf;
 }
@@ -787,7 +790,7 @@ static void notify_and_destroy(struct net *net, struct sk_buff *skb,
  *
  * On success, destroy old qdisc.
  */
-
+// "嫁接"Qdisc, 将新的Qdisc节点添加到父节点作为叶节点
 static int qdisc_graft(struct net_device *dev, struct Qdisc *parent,
 		       struct sk_buff *skb, struct nlmsghdr *n, u32 classid,
 		       struct Qdisc *new, struct Qdisc *old)
@@ -796,6 +799,7 @@ static int qdisc_graft(struct net_device *dev, struct Qdisc *parent,
 	struct net *net = dev_net(dev);
 	int err = 0;
 
+    // 父qdisc节点为空, 将新节点作为dev的基本qdisc, 返回dev原来的老的qdisc
 	if (parent == NULL) {
 		unsigned int i, num_q, ingress;
 

@@ -556,6 +556,7 @@ struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
 
 	if (!p)
 		goto errout;
+    // 确保从缓冲区中的sch到缓冲区结束点空间是32字节对齐的
 	sch = (struct Qdisc *) QDISC_ALIGN((unsigned long) p);
 	/* if we got non aligned memory, ask more and do alignment ourself */
 	if (sch != p) {
@@ -565,7 +566,7 @@ struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
 		if (!p)
 			goto errout;
 		sch = (struct Qdisc *) QDISC_ALIGN((unsigned long) p);
-		sch->padded = (char *) sch - (char *) p;
+		sch->padded = (char *) sch - (char *) p;// 填充字节的数量
 	}
 	INIT_LIST_HEAD(&sch->list);
 	skb_queue_head_init(&sch->q);
@@ -578,7 +579,7 @@ struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
 	sch->enqueue = ops->enqueue;
 	sch->dequeue = ops->dequeue;
 	sch->dev_queue = dev_queue;
-	dev_hold(dev);
+	dev_hold(dev);      // 网卡使用计数增加
 	atomic_set(&sch->refcnt, 1);
 
 	return sch;
@@ -595,15 +596,16 @@ struct Qdisc *qdisc_create_dflt(struct netdev_queue *dev_queue,
 	if (!try_module_get(ops->owner))
 		goto errout;
 
-	sch = qdisc_alloc(dev_queue, ops);
+	sch = qdisc_alloc(dev_queue, ops);// 分配Qdisc结构 
 	if (IS_ERR(sch))
 		goto errout;
 	sch->parent = parentid;
 
+    // 如果没有初始化函数或者初始化成功, 返回Qdisc结构
 	if (!ops->init || ops->init(sch, NULL) == 0)
 		return sch;
 
-	qdisc_destroy(sch);
+	qdisc_destroy(sch); // 初始化失败, 释放Qdisc
 errout:
 	return NULL;
 }
@@ -652,7 +654,7 @@ void qdisc_destroy(struct Qdisc *qdisc)
 	if (ops->destroy)
 		ops->destroy(qdisc);
 
-	module_put(ops->owner);
+	module_put(ops->owner);// 减少操作结构的模块计数
 	dev_put(qdisc_dev(qdisc));
 
 	kfree_skb(qdisc->gso_skb);
@@ -660,7 +662,7 @@ void qdisc_destroy(struct Qdisc *qdisc)
 	 * gen_estimator est_timer() might access qdisc->q.lock,
 	 * wait a RCU grace period before freeing qdisc.
 	 */
-	call_rcu(&qdisc->rcu_head, qdisc_rcu_free);
+	call_rcu(&qdisc->rcu_head, qdisc_rcu_free);// 对每个CPU的数据进行具体空间释放
 }
 EXPORT_SYMBOL(qdisc_destroy);
 
@@ -751,6 +753,7 @@ static void transition_one_qdisc(struct net_device *dev,
 	}
 }
 
+/* 重新对qdisc指针赋值，但未对qdisc_ingress赋值 */
 void dev_activate(struct net_device *dev)
 {
 	int need_watchdog;
@@ -883,6 +886,7 @@ static void dev_init_scheduler_queue(struct net_device *dev,
 	dev_queue->qdisc_sleeping = qdisc;
 }
 
+/* 对网卡设备的流控队列处理进行了初始化, 也就是说每个网络网卡设备的qdisc指针都不会是空的 */
 void dev_init_scheduler(struct net_device *dev)
 {
 	dev->qdisc = &noop_qdisc;

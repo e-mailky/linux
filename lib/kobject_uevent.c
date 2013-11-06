@@ -155,6 +155,7 @@ int kobject_uevent_env(struct kobject *kobj, enum kobject_action action,
 
 	/* search the kset we belong to */
 	top_kobj = kobj;
+    /* 由kobject的parent向上查找，直到找到一个kobject包含kset */
 	while (!top_kobj->kset && top_kobj->parent)
 		top_kobj = top_kobj->parent;
 
@@ -176,6 +177,7 @@ int kobject_uevent_env(struct kobject *kobj, enum kobject_action action,
 		return 0;
 	}
 	/* skip the event, if the filter returns zero. */
+    /* 如果kset中有filter函数，调用filter函数，看看是否需要过滤uevent消息 */
 	if (uevent_ops && uevent_ops->filter)
 		if (!uevent_ops->filter(kset, kobj)) {
 			pr_debug("kobject: '%s' (%p): %s: filter function "
@@ -185,6 +187,8 @@ int kobject_uevent_env(struct kobject *kobj, enum kobject_action action,
 		}
 
 	/* originating subsystem */
+    /* 如果kset中有name函数，调用name函数得到subsystem的名字；否则，
+    * subsystem的名字是kset中kobject的名字 */
 	if (uevent_ops && uevent_ops->name)
 		subsystem = uevent_ops->name(kset, kobj);
 	else
@@ -196,7 +200,7 @@ int kobject_uevent_env(struct kobject *kobj, enum kobject_action action,
 		return 0;
 	}
 
-	/* environment buffer */
+	/* environment buffer 分配一个kobj_uevent_env，并开始填充env环境变量 */
 	env = kzalloc(sizeof(struct kobj_uevent_env), GFP_KERNEL);
 	if (!env)
 		return -ENOMEM;

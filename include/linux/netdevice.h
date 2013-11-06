@@ -546,8 +546,8 @@ struct netdev_queue {
  * read mostly part
  */
 	struct net_device	*dev;
-	struct Qdisc		*qdisc;
-	struct Qdisc		*qdisc_sleeping;
+	struct Qdisc		*qdisc;             // 这是发送数据时的队列处理
+	struct Qdisc		*qdisc_sleeping;    // 网卡停止时保存网卡活动时的队列处理方法
 #ifdef CONFIG_SYSFS
 	struct kobject		kobj;
 #endif

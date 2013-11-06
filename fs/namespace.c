@@ -839,7 +839,7 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	if (!type)
 		return ERR_PTR(-ENODEV);
 
-	mnt = alloc_vfsmnt(name);
+	mnt = alloc_vfsmnt(name);//½¨Á¢²¢Ìî³ävfsmount 
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
 

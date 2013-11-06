@@ -58,7 +58,7 @@ enum kobject_action {
 	KOBJ_MAX
 };
 
-struct kobject {
+struct kobject {// 代表sysfs中的目录
 	const char		*name;      //指向设备名称的指针
 	struct list_head	entry;  //挂接到所在kset中去的单元
 	struct kobject		*parent;//指向父对象的指针
@@ -110,7 +110,7 @@ extern void kobject_put(struct kobject *kobj);
 extern const void *kobject_namespace(struct kobject *kobj);
 extern char *kobject_get_path(struct kobject *kobj, gfp_t flag);
 
-struct kobj_type {
+struct kobj_type { // 代表kobject的类型
 	void (*release)(struct kobject *kobj);
 	const struct sysfs_ops *sysfs_ops;
 	struct attribute **default_attrs;
