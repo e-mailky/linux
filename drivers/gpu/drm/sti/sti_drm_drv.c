@@ -67,8 +67,12 @@ static int sti_drm_load(struct drm_device *dev, unsigned long flags)
 	sti_drm_mode_config_init(dev);
 
 	ret = component_bind_all(dev->dev, dev);
-	if (ret)
+	if (ret) {
+		drm_kms_helper_poll_fini(dev);
+		drm_mode_config_cleanup(dev);
+		kfree(private);
 		return ret;
+	}
 
 	drm_helper_disable_unused_functions(dev);
 
@@ -184,7 +188,6 @@ static struct platform_driver sti_drm_master_driver = {
 	.probe = sti_drm_master_probe,
 	.remove = sti_drm_master_remove,
 	.driver = {
-		.owner = THIS_MODULE,
 		.name = DRIVER_NAME "__master",
 	},
 };
@@ -201,8 +204,8 @@ static int sti_drm_platform_probe(struct platform_device *pdev)
 	master = platform_device_register_resndata(dev,
 			DRIVER_NAME "__master", -1,
 			NULL, 0, NULL, 0);
-	if (!master)
-		return -EINVAL;
+	if (IS_ERR(master))
+               return PTR_ERR(master);
 
 	platform_set_drvdata(pdev, master);
 	return 0;
@@ -228,7 +231,6 @@ static struct platform_driver sti_drm_platform_driver = {
 	.probe = sti_drm_platform_probe,
 	.remove = sti_drm_platform_remove,
 	.driver = {
-		.owner = THIS_MODULE,
 		.name = DRIVER_NAME,
 		.of_match_table = sti_drm_dt_ids,
 	},

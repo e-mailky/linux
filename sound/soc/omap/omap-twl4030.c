@@ -260,7 +260,7 @@ static struct snd_soc_dai_link omap_twl4030_dai_links[] = {
 		.stream_name = "TWL4030 Voice",
 		.cpu_dai_name = "omap-mcbsp.3",
 		.codec_dai_name = "twl4030-voice",
-		.platform_name = "omap-mcbsp.2",
+		.platform_name = "omap-mcbsp.3",
 		.codec_name = "twl4030-codec",
 		.dai_fmt = SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_IB_NF |
 			   SND_SOC_DAIFMT_CBM_CFM,
@@ -375,7 +375,6 @@ MODULE_DEVICE_TABLE(of, omap_twl4030_of_match);
 static struct platform_driver omap_twl4030_driver = {
 	.driver = {
 		.name = "omap-twl4030",
-		.owner = THIS_MODULE,
 		.pm = &snd_soc_pm_ops,
 		.of_match_table = omap_twl4030_of_match,
 	},

@@ -43,9 +43,12 @@ static struct usb_device_id rtw_usb_id_tbl[] = {
 	{USB_DEVICE(USB_VENDER_ID_REALTEK, 0x0179)}, /* 8188ETV */
 	/*=== Customer ID ===*/
 	/****** 8188EUS ********/
+	{USB_DEVICE(0x056e, 0x4008)}, /* Elecom WDC-150SU2M */
 	{USB_DEVICE(0x07b8, 0x8179)}, /* Abocom - Abocom */
 	{USB_DEVICE(0x2001, 0x330F)}, /* DLink DWA-125 REV D1 */
 	{USB_DEVICE(0x2001, 0x3310)}, /* Dlink DWA-123 REV D1 */
+	{USB_DEVICE(0x2001, 0x3311)}, /* DLink GO-USB-N150 REV B1 */
+	{USB_DEVICE(0x0df6, 0x0076)}, /* Sitecom N150 v2 */
 	{}	/* Terminating entry */
 };
 
@@ -60,7 +63,6 @@ static struct dvobj_priv *usb_dvobj_init(struct usb_interface *usb_intf)
 	struct usb_config_descriptor	*pconf_desc;
 	struct usb_host_interface	*phost_iface;
 	struct usb_interface_descriptor	*piface_desc;
-	struct usb_host_endpoint	*phost_endp;
 	struct usb_endpoint_descriptor	*pendp_desc;
 	struct usb_device	*pusbd;
 
@@ -89,24 +91,22 @@ static struct dvobj_priv *usb_dvobj_init(struct usb_interface *usb_intf)
 
 	for (i = 0; i < pdvobjpriv->nr_endpoint; i++) {
 		int ep_num;
-		phost_endp = phost_iface->endpoint + i;
+		pendp_desc = &phost_iface->endpoint[i].desc;
 
-		if (phost_endp) {
-			pendp_desc = &phost_endp->desc;
-			ep_num = usb_endpoint_num(pendp_desc);
+		ep_num = usb_endpoint_num(pendp_desc);
 
-			if (usb_endpoint_is_bulk_in(pendp_desc)) {
-				pdvobjpriv->RtInPipe[pdvobjpriv->RtNumInPipes] = ep_num;
-				pdvobjpriv->RtNumInPipes++;
-			} else if (usb_endpoint_is_int_in(pendp_desc)) {
-				pdvobjpriv->RtInPipe[pdvobjpriv->RtNumInPipes] = ep_num;
-				pdvobjpriv->RtNumInPipes++;
-			} else if (usb_endpoint_is_bulk_out(pendp_desc)) {
-				pdvobjpriv->RtOutPipe[pdvobjpriv->RtNumOutPipes] = ep_num;
-				pdvobjpriv->RtNumOutPipes++;
-			}
-			pdvobjpriv->ep_num[i] = ep_num;
+		if (usb_endpoint_is_bulk_in(pendp_desc)) {
+			pdvobjpriv->RtInPipe[pdvobjpriv->RtNumInPipes] = ep_num;
+			pdvobjpriv->RtNumInPipes++;
+		} else if (usb_endpoint_is_int_in(pendp_desc)) {
+			pdvobjpriv->RtInPipe[pdvobjpriv->RtNumInPipes] = ep_num;
+			pdvobjpriv->RtNumInPipes++;
+		} else if (usb_endpoint_is_bulk_out(pendp_desc)) {
+			pdvobjpriv->RtOutPipe[pdvobjpriv->RtNumOutPipes] =
+				ep_num;
+			pdvobjpriv->RtNumOutPipes++;
 		}
+		pdvobjpriv->ep_num[i] = ep_num;
 	}
 
 	if (pusbd->speed == USB_SPEED_HIGH)
@@ -554,8 +554,6 @@ static void rtw_dev_remove(struct usb_interface *pusb_intf)
 
 	RT_TRACE(_module_hci_intfs_c_, _drv_err_, ("-dev_remove()\n"));
 	DBG_88E("-r871xu_dev_remove, done\n");
-
-	return;
 }
 
 static struct usb_driver rtl8188e_usb_drv = {

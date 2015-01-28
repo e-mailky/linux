@@ -1754,7 +1754,7 @@ static int ab8500_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-#if CONFIG_DEBUG_FS
+#ifdef CONFIG_DEBUG_FS
 	/* Pass to debugfs */
 	ab8500_debug_resources[0].start = ab8500->irq;
 	ab8500_debug_resources[0].end = ab8500->irq;
@@ -1848,7 +1848,6 @@ static const struct platform_device_id ab8500_id[] = {
 static struct platform_driver ab8500_core_driver = {
 	.driver = {
 		.name = "ab8500-core",
-		.owner = THIS_MODULE,
 	},
 	.probe	= ab8500_probe,
 	.remove	= ab8500_remove,

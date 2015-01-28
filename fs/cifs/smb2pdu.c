@@ -431,8 +431,7 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 	if (rc)
 		goto neg_exit;
 	if (blob_length)
-		rc = decode_neg_token_init(security_blob, blob_length,
-				   &server->sec_type);
+		rc = decode_negTokenInit(security_blob, blob_length, server);
 	if (rc == 1)
 		rc = 0;
 	else if (rc == 0) {
@@ -530,7 +529,7 @@ SMB2_sess_setup(const unsigned int xid, struct cifs_ses *ses,
 	struct smb2_sess_setup_rsp *rsp = NULL;
 	struct kvec iov[2];
 	int rc = 0;
-	int resp_buftype;
+	int resp_buftype = CIFS_NO_BUFFER;
 	__le32 phase = NtLmNegotiate; /* NTLMSSP, if needed, is multistage */
 	struct TCP_Server_Info *server = ses->server;
 	u16 blob_length = 0;
@@ -1098,6 +1097,8 @@ SMB2_open(const unsigned int xid, struct cifs_open_parms *oparms, __le16 *path,
 
 	if (oparms->create_options & CREATE_OPTION_READONLY)
 		file_attributes |= ATTR_READONLY;
+	if (oparms->create_options & CREATE_OPTION_SPECIAL)
+		file_attributes |= ATTR_SYSTEM;
 
 	req->ImpersonationLevel = IL_IMPERSONATION;
 	req->DesiredAccess = cpu_to_le32(oparms->desired_access);
@@ -1357,7 +1358,7 @@ SMB2_set_compression(const unsigned int xid, struct cifs_tcon *tcon,
 	char *ret_data = NULL;
 
 	fsctl_input.CompressionState =
-			__constant_cpu_to_le16(COMPRESSION_FORMAT_DEFAULT);
+			cpu_to_le16(COMPRESSION_FORMAT_DEFAULT);
 
 	rc = SMB2_ioctl(xid, tcon, persistent_fid, volatile_fid,
 			FSCTL_SET_COMPRESSION, true /* is_fsctl */,
@@ -1403,8 +1404,7 @@ SMB2_close(const unsigned int xid, struct cifs_tcon *tcon,
 	rsp = (struct smb2_close_rsp *)iov[0].iov_base;
 
 	if (rc != 0) {
-		if (tcon)
-			cifs_stats_fail_inc(tcon, SMB2_CLOSE_HE);
+		cifs_stats_fail_inc(tcon, SMB2_CLOSE_HE);
 		goto close_exit;
 	}
 
@@ -1533,7 +1533,7 @@ SMB2_query_info(const unsigned int xid, struct cifs_tcon *tcon,
 {
 	return query_info(xid, tcon, persistent_fid, volatile_fid,
 			  FILE_ALL_INFORMATION,
-			  sizeof(struct smb2_file_all_info) + MAX_NAME * 2,
+			  sizeof(struct smb2_file_all_info) + PATH_MAX * 2,
 			  sizeof(struct smb2_file_all_info), data);
 }
 

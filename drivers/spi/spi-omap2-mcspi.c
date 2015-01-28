@@ -329,7 +329,8 @@ static void omap2_mcspi_set_fifo(const struct spi_device *spi,
 disable_fifo:
 	if (t->rx_buf != NULL)
 		chconf &= ~OMAP2_MCSPI_CHCONF_FFER;
-	else
+
+	if (t->tx_buf != NULL)
 		chconf &= ~OMAP2_MCSPI_CHCONF_FFET;
 
 	mcspi_write_chconf0(spi, chconf);
@@ -1520,7 +1521,6 @@ static const struct dev_pm_ops omap2_mcspi_pm_ops = {
 static struct platform_driver omap2_mcspi_driver = {
 	.driver = {
 		.name =		"omap2_mcspi",
-		.owner =	THIS_MODULE,
 		.pm =		&omap2_mcspi_pm_ops,
 		.of_match_table = omap_mcspi_of_match,
 	},

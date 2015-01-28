@@ -578,6 +578,19 @@ int usbhs_pipe_is_dir_host(struct usbhs_pipe *pipe)
 	return usbhsp_flags_has(pipe, IS_DIR_HOST);
 }
 
+int usbhs_pipe_is_running(struct usbhs_pipe *pipe)
+{
+	return usbhsp_flags_has(pipe, IS_RUNNING);
+}
+
+void usbhs_pipe_running(struct usbhs_pipe *pipe, int running)
+{
+	if (running)
+		usbhsp_flags_set(pipe, IS_RUNNING);
+	else
+		usbhsp_flags_clr(pipe, IS_RUNNING);
+}
+
 void usbhs_pipe_data_sequence(struct usbhs_pipe *pipe, int sequence)
 {
 	u16 mask = (SQCLR | SQSET);
@@ -605,8 +618,12 @@ void usbhs_pipe_data_sequence(struct usbhs_pipe *pipe, int sequence)
 
 void usbhs_pipe_clear(struct usbhs_pipe *pipe)
 {
-	usbhsp_pipectrl_set(pipe, ACLRM, ACLRM);
-	usbhsp_pipectrl_set(pipe, ACLRM, 0);
+	if (usbhs_pipe_is_dcp(pipe)) {
+		usbhs_fifo_clear_dcp(pipe);
+	} else {
+		usbhsp_pipectrl_set(pipe, ACLRM, ACLRM);
+		usbhsp_pipectrl_set(pipe, ACLRM, 0);
+	}
 }
 
 static struct usbhs_pipe *usbhsp_get_pipe(struct usbhs_priv *priv, u32 type)

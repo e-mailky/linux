@@ -260,6 +260,7 @@ static int __init xen_guest_init(void)
 	xen_domain_type = XEN_HVM_DOMAIN;
 
 	xen_setup_features();
+
 	if (xen_feature(XENFEAT_dom0))
 		xen_start_info->flags |= SIF_INITDOMAIN|SIF_PRIVILEGED;
 	else

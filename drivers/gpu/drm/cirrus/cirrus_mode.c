@@ -16,6 +16,7 @@
  */
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_plane_helper.h>
 
 #include <video/cirrus.h>
 
@@ -555,6 +556,7 @@ static struct drm_connector *cirrus_vga_init(struct drm_device *dev)
 
 	drm_connector_helper_add(connector, &cirrus_vga_connector_helper_funcs);
 
+	drm_connector_register(connector);
 	return connector;
 }
 

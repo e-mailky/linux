@@ -4,7 +4,7 @@
  * sound/soc/codecs/sta529.c -- spear ALSA Soc codec driver
  *
  * Copyright (C) 2012 ST Microelectronics
- * Rajeev Kumar <rajeev-dlh.kumar@st.com>
+ * Rajeev Kumar <rajeevkumar.linux@gmail.com>
  *
  * This file is licensed under the terms of the GNU General Public
  * License version 2. This program is licensed "as is" without any
@@ -319,41 +319,10 @@ static struct snd_soc_dai_driver sta529_dai = {
 	.ops	= &sta529_dai_ops,
 };
 
-static int sta529_probe(struct snd_soc_codec *codec)
-{
-	sta529_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
-
-	return 0;
-}
-
-/* power down chip */
-static int sta529_remove(struct snd_soc_codec *codec)
-{
-	sta529_set_bias_level(codec, SND_SOC_BIAS_OFF);
-
-	return 0;
-}
-
-static int sta529_suspend(struct snd_soc_codec *codec)
-{
-	sta529_set_bias_level(codec, SND_SOC_BIAS_OFF);
-
-	return 0;
-}
-
-static int sta529_resume(struct snd_soc_codec *codec)
-{
-	sta529_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
-
-	return 0;
-}
-
 static const struct snd_soc_codec_driver sta529_codec_driver = {
-	.probe = sta529_probe,
-	.remove = sta529_remove,
 	.set_bias_level = sta529_set_bias_level,
-	.suspend = sta529_suspend,
-	.resume = sta529_resume,
+	.suspend_bias_off = true,
+
 	.controls = sta529_snd_controls,
 	.num_controls = ARRAY_SIZE(sta529_snd_controls),
 };
@@ -426,5 +395,5 @@ static struct i2c_driver sta529_i2c_driver = {
 module_i2c_driver(sta529_i2c_driver);
 
 MODULE_DESCRIPTION("ASoC STA529 codec driver");
-MODULE_AUTHOR("Rajeev Kumar <rajeev-dlh.kumar@st.com>");
+MODULE_AUTHOR("Rajeev Kumar <rajeevkumar.linux@gmail.com>");
 MODULE_LICENSE("GPL");

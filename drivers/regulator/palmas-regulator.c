@@ -1427,7 +1427,6 @@ static void palmas_dt_to_pdata(struct device *dev,
 	u32 prop;
 	int idx, ret;
 
-	node = of_node_get(node);
 	regulators = of_get_child_by_name(node, "regulators");
 	if (!regulators) {
 		dev_info(dev, "regulator node not found\n");
@@ -1611,7 +1610,6 @@ static struct platform_driver palmas_driver = {
 	.driver = {
 		.name = "palmas-pmic",
 		.of_match_table = of_palmas_match_tbl,
-		.owner = THIS_MODULE,
 	},
 	.probe = palmas_regulators_probe,
 };

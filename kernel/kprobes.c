@@ -127,7 +127,7 @@ static void *alloc_insn_page(void)
 
 static void free_insn_page(void *page)
 {
-	module_free(NULL, page);
+	module_memfree(page);
 }
 
 struct kprobe_insn_cache kprobe_insn_slots = {
@@ -915,7 +915,7 @@ static struct kprobe *alloc_aggr_kprobe(struct kprobe *p)
 #ifdef CONFIG_KPROBES_ON_FTRACE
 static struct ftrace_ops kprobe_ftrace_ops __read_mostly = {
 	.func = kprobe_ftrace_handler,
-	.flags = FTRACE_OPS_FL_SAVE_REGS,
+	.flags = FTRACE_OPS_FL_SAVE_REGS | FTRACE_OPS_FL_IPMODIFY,
 };
 static int kprobe_ftrace_enabled;
 
@@ -1410,16 +1410,10 @@ static inline int check_kprobe_rereg(struct kprobe *p)
 	return ret;
 }
 
-static int check_kprobe_address_safe(struct kprobe *p,
-				     struct module **probed_mod)
+int __weak arch_check_ftrace_location(struct kprobe *p)
 {
-	int ret = 0;
 	unsigned long ftrace_addr;
 
-	/*
-	 * If the address is located on a ftrace nop, set the
-	 * breakpoint to the following instruction.
-	 */
 	ftrace_addr = ftrace_location((unsigned long)p->addr);
 	if (ftrace_addr) {
 #ifdef CONFIG_KPROBES_ON_FTRACE
@@ -1431,7 +1425,17 @@ static int check_kprobe_address_safe(struct kprobe *p,
 		return -EINVAL;
 #endif
 	}
+	return 0;
+}
 
+static int check_kprobe_address_safe(struct kprobe *p,
+				     struct module **probed_mod)
+{
+	int ret;
+
+	ret = arch_check_ftrace_location(p);
+	if (ret)
+		return ret;
 	jump_label_lock();
 	preempt_disable();
 
@@ -1778,7 +1782,18 @@ static int pre_handler_kretprobe(struct kprobe *p, struct pt_regs *regs)
 	unsigned long hash, flags = 0;
 	struct kretprobe_instance *ri;
 
-	/*TODO: consider to only swap the RA after the last pre_handler fired */
+	/*
+	 * To avoid deadlocks, prohibit return probing in NMI contexts,
+	 * just skip the probe and increase the (inexact) 'nmissed'
+	 * statistical counter, so that the user is informed that
+	 * something happened:
+	 */
+	if (unlikely(in_nmi())) {
+		rp->nmissed++;
+		return 0;
+	}
+
+	/* TODO: consider to only swap the RA after the last pre_handler fired */
 	hash = hash_ptr(current, KPROBE_HASH_BITS);
 	raw_spin_lock_irqsave(&rp->lock, flags);
 	if (!hlist_empty(&rp->free_instances)) {

@@ -12,14 +12,13 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/omap-gpmc.h>
 #include <linux/mtd/nand.h>
 #include <linux/platform_data/mtd-nand-omap2.h>
 
 #include <asm/mach/flash.h>
 
-#include "gpmc.h"
 #include "soc.h"
-#include "gpmc-nand.h"
 
 /* minimum size for IO mapping */
 #define	NAND_IO_SIZE	4
@@ -49,7 +48,8 @@ static bool gpmc_hwecc_bch_capable(enum omap_ecc ecc_opt)
 		return 0;
 
 	/* legacy platforms support only HAM1 (1-bit Hamming) ECC scheme */
-	if (ecc_opt == OMAP_ECC_HAM1_CODE_HW)
+	if (ecc_opt == OMAP_ECC_HAM1_CODE_HW ||
+	    ecc_opt == OMAP_ECC_HAM1_CODE_SW)
 		return 1;
 	else
 		return 0;

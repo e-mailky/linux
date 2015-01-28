@@ -39,6 +39,7 @@ struct cppi41_dma_channel {
 	u32 transferred;
 	u32 packet_sz;
 	struct list_head tx_check;
+	int tx_zlp;
 };
 
 #define MUSB_DMA_NUM_CHANNELS 15
@@ -122,6 +123,8 @@ static void cppi41_trans_done(struct cppi41_dma_channel *cppi41_channel)
 {
 	struct musb_hw_ep *hw_ep = cppi41_channel->hw_ep;
 	struct musb *musb = hw_ep->musb;
+	void __iomem *epio = hw_ep->regs;
+	u16 csr;
 
 	if (!cppi41_channel->prog_len ||
 	    (cppi41_channel->channel.status == MUSB_DMA_STATUS_FREE)) {
@@ -131,15 +134,24 @@ static void cppi41_trans_done(struct cppi41_dma_channel *cppi41_channel)
 			cppi41_channel->transferred;
 		cppi41_channel->channel.status = MUSB_DMA_STATUS_FREE;
 		cppi41_channel->channel.rx_packet_done = true;
+
+		/*
+		 * transmit ZLP using PIO mode for transfers which size is
+		 * multiple of EP packet size.
+		 */
+		if (cppi41_channel->tx_zlp && (cppi41_channel->transferred %
+					cppi41_channel->packet_sz) == 0) {
+			musb_ep_select(musb->mregs, hw_ep->epnum);
+			csr = MUSB_TXCSR_MODE | MUSB_TXCSR_TXPKTRDY;
+			musb_writew(epio, MUSB_TXCSR, csr);
+		}
 		musb_dma_completion(musb, hw_ep->epnum, cppi41_channel->is_tx);
 	} else {
 		/* next iteration, reload */
 		struct dma_chan *dc = cppi41_channel->dc;
 		struct dma_async_tx_descriptor *dma_desc;
 		enum dma_transfer_direction direction;
-		u16 csr;
 		u32 remain_bytes;
-		void __iomem *epio = cppi41_channel->hw_ep->regs;
 
 		cppi41_channel->buf_addr += cppi41_channel->packet_sz;
 
@@ -197,10 +209,11 @@ static enum hrtimer_restart cppi41_recheck_tx_req(struct hrtimer *timer)
 		}
 	}
 
-	if (!list_empty(&controller->early_tx_list)) {
+	if (!list_empty(&controller->early_tx_list) &&
+	    !hrtimer_is_queued(&controller->early_tx)) {
 		ret = HRTIMER_RESTART;
 		hrtimer_forward_now(&controller->early_tx,
-				ktime_set(0, 50 * NSEC_PER_USEC));
+				ktime_set(0, 20 * NSEC_PER_USEC));
 	}
 
 	spin_unlock_irqrestore(&musb->lock, flags);
@@ -240,6 +253,7 @@ static void cppi41_dma_callback(void *private_data)
 		cppi41_trans_done(cppi41_channel);
 	} else {
 		struct cppi41_dma_controller *controller;
+		int is_hs = 0;
 		/*
 		 * On AM335x it has been observed that the TX interrupt fires
 		 * too early that means the TXFIFO is not yet empty but the DMA
@@ -252,7 +266,14 @@ static void cppi41_dma_callback(void *private_data)
 		 */
 		controller = cppi41_channel->controller;
 
-		if (musb->g.speed == USB_SPEED_HIGH) {
+		if (is_host_active(musb)) {
+			if (musb->port1_status & USB_PORT_STAT_HIGH_SPEED)
+				is_hs = 1;
+		} else {
+			if (musb->g.speed == USB_SPEED_HIGH)
+				is_hs = 1;
+		}
+		if (is_hs) {
 			unsigned wait = 25;
 
 			do {
@@ -278,7 +299,7 @@ static void cppi41_dma_callback(void *private_data)
 
 			hrtimer_start_range_ns(&controller->early_tx,
 				ktime_set(0, usecs * NSEC_PER_USEC),
-				40 * NSEC_PER_USEC,
+				20 * NSEC_PER_USEC,
 				HRTIMER_MODE_REL);
 		}
 	}
@@ -363,6 +384,7 @@ static bool cppi41_configure_channel(struct dma_channel *channel,
 	cppi41_channel->total_len = len;
 	cppi41_channel->transferred = 0;
 	cppi41_channel->packet_sz = packet_sz;
+	cppi41_channel->tx_zlp = (cppi41_channel->is_tx && mode) ? 1 : 0;
 
 	/*
 	 * Due to AM335x' Advisory 1.0.13 we are not allowed to transfer more
@@ -606,9 +628,9 @@ static int cppi41_dma_controller_start(struct cppi41_dma_controller *controller)
 		ret = of_property_read_string_index(np, "dma-names", i, &str);
 		if (ret)
 			goto err;
-		if (!strncmp(str, "tx", 2))
+		if (strstarts(str, "tx"))
 			is_tx = 1;
-		else if (!strncmp(str, "rx", 2))
+		else if (strstarts(str, "rx"))
 			is_tx = 0;
 		else {
 			dev_err(dev, "Wrong dmatype %s\n", str);

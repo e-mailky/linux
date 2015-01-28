@@ -29,7 +29,7 @@
 EXPORT_TRACEPOINT_SYMBOL(fence_annotate_wait_on);
 EXPORT_TRACEPOINT_SYMBOL(fence_emit);
 
-/**
+/*
  * fence context counter: each execution context should have its own
  * fence context, this allows checking if fences belong to the same
  * context or not. One device can have multiple separate contexts,
@@ -283,7 +283,7 @@ EXPORT_SYMBOL(fence_add_callback);
  * @cb:		[in]	the callback to remove
  *
  * Remove a previously queued callback from the fence. This function returns
- * true if the callback is succesfully removed, or false if the fence has
+ * true if the callback is successfully removed, or false if the fence has
  * already been signaled.
  *
  * *WARNING*:

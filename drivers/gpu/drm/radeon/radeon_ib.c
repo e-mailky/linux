@@ -64,10 +64,7 @@ int radeon_ib_get(struct radeon_device *rdev, int ring,
 		return r;
 	}
 
-	r = radeon_semaphore_create(rdev, &ib->semaphore);
-	if (r) {
-		return r;
-	}
+	radeon_sync_create(&ib->sync);
 
 	ib->ring = ring;
 	ib->fence = NULL;
@@ -96,7 +93,7 @@ int radeon_ib_get(struct radeon_device *rdev, int ring,
  */
 void radeon_ib_free(struct radeon_device *rdev, struct radeon_ib *ib)
 {
-	radeon_semaphore_free(rdev, &ib->semaphore, ib->fence);
+	radeon_sync_free(rdev, &ib->sync, ib->fence);
 	radeon_sa_bo_free(rdev, &ib->sa_bo, ib->fence);
 	radeon_fence_unref(&ib->fence);
 }
@@ -107,6 +104,7 @@ void radeon_ib_free(struct radeon_device *rdev, struct radeon_ib *ib)
  * @rdev: radeon_device pointer
  * @ib: IB object to schedule
  * @const_ib: Const IB to schedule (SI only)
+ * @hdp_flush: Whether or not to perform an HDP cache flush
  *
  * Schedule an IB on the associated ring (all asics).
  * Returns 0 on success, error on failure.
@@ -122,7 +120,7 @@ void radeon_ib_free(struct radeon_device *rdev, struct radeon_ib *ib)
  * to SI there was just a DE IB.
  */
 int radeon_ib_schedule(struct radeon_device *rdev, struct radeon_ib *ib,
-		       struct radeon_ib *const_ib)
+		       struct radeon_ib *const_ib, bool hdp_flush)
 {
 	struct radeon_ring *ring = &rdev->ring[ib->ring];
 	int r = 0;
@@ -144,11 +142,11 @@ int radeon_ib_schedule(struct radeon_device *rdev, struct radeon_ib *ib,
 	if (ib->vm) {
 		struct radeon_fence *vm_id_fence;
 		vm_id_fence = radeon_vm_grab_id(rdev, ib->vm, ib->ring);
-        	radeon_semaphore_sync_to(ib->semaphore, vm_id_fence);
+		radeon_sync_fence(&ib->sync, vm_id_fence);
 	}
 
 	/* sync with other rings */
-	r = radeon_semaphore_sync_rings(rdev, ib->semaphore, ib->ring);
+	r = radeon_sync_rings(rdev, &ib->sync, ib->ring);
 	if (r) {
 		dev_err(rdev->dev, "failed to sync rings (%d)\n", r);
 		radeon_ring_unlock_undo(rdev, ring);
@@ -156,11 +154,12 @@ int radeon_ib_schedule(struct radeon_device *rdev, struct radeon_ib *ib,
 	}
 
 	if (ib->vm)
-		radeon_vm_flush(rdev, ib->vm, ib->ring);
+		radeon_vm_flush(rdev, ib->vm, ib->ring,
+				ib->sync.last_vm_update);
 
 	if (const_ib) {
 		radeon_ring_ib_execute(rdev, const_ib->ring, const_ib);
-		radeon_semaphore_free(rdev, &const_ib->semaphore, NULL);
+		radeon_sync_free(rdev, &const_ib->sync, NULL);
 	}
 	radeon_ring_ib_execute(rdev, ib->ring, ib);
 	r = radeon_fence_emit(rdev, &ib->fence, ib->ring);
@@ -176,7 +175,7 @@ int radeon_ib_schedule(struct radeon_device *rdev, struct radeon_ib *ib,
 	if (ib->vm)
 		radeon_vm_fence(rdev, ib->vm, ib->fence);
 
-	radeon_ring_unlock_commit(rdev, ring);
+	radeon_ring_unlock_commit(rdev, ring, hdp_flush);
 	return 0;
 }
 
@@ -268,6 +267,7 @@ int radeon_ib_ring_tests(struct radeon_device *rdev)
 
 		r = radeon_ib_test(rdev, i, ring);
 		if (r) {
+			radeon_fence_driver_force_completion(rdev, i);
 			ring->ready = false;
 			rdev->needs_reset = false;
 

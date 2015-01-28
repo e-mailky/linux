@@ -163,6 +163,7 @@ enum miphy_sata_gen {
 };
 
 static u8 rx_tx_spd[] = {
+	0, /* GEN0 doesn't exist. */
 	TX_SPDSEL_GEN1_VAL | RX_SPDSEL_GEN1_VAL,
 	TX_SPDSEL_GEN2_VAL | RX_SPDSEL_GEN2_VAL,
 	TX_SPDSEL_GEN3_VAL | RX_SPDSEL_GEN3_VAL
@@ -592,7 +593,7 @@ static int miphy365x_probe(struct platform_device *pdev)
 
 		miphy_dev->phys[port] = miphy_phy;
 
-		phy = devm_phy_create(&pdev->dev, child, &miphy365x_ops, NULL);
+		phy = devm_phy_create(&pdev->dev, child, &miphy365x_ops);
 		if (IS_ERR(phy)) {
 			dev_err(&pdev->dev, "failed to create PHY\n");
 			return PTR_ERR(phy);
@@ -609,10 +610,7 @@ static int miphy365x_probe(struct platform_device *pdev)
 	}
 
 	provider = devm_of_phy_provider_register(&pdev->dev, miphy365x_xlate);
-	if (IS_ERR(provider))
-		return PTR_ERR(provider);
-
-	return 0;
+	return PTR_ERR_OR_ZERO(provider);
 }
 
 static const struct of_device_id miphy365x_of_match[] = {
@@ -625,7 +623,6 @@ static struct platform_driver miphy365x_driver = {
 	.probe	= miphy365x_probe,
 	.driver = {
 		.name	= "miphy365x-phy",
-		.owner	= THIS_MODULE,
 		.of_match_table	= miphy365x_of_match,
 	}
 };

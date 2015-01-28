@@ -471,10 +471,14 @@ void __init omap3xxx_check_revision(void)
 			cpu_rev = "1.0";
 			break;
 		case 1:
-		/* FALLTHROUGH */
-		default:
 			omap_revision = AM437X_REV_ES1_1;
 			cpu_rev = "1.1";
+			break;
+		case 2:
+		/* FALLTHROUGH */
+		default:
+			omap_revision = AM437X_REV_ES1_2;
+			cpu_rev = "1.2";
 			break;
 		}
 		break;
@@ -663,7 +667,7 @@ void __init dra7xxx_check_revision(void)
 
 	default:
 		/* Unknown default to latest silicon rev as default*/
-		pr_warn("%s: unknown idcode=0x%08x (hawkeye=0x%08x,rev=0x%d)\n",
+		pr_warn("%s: unknown idcode=0x%08x (hawkeye=0x%08x,rev=0x%x)\n",
 			__func__, idcode, hawkeye, rev);
 		omap_revision = DRA752_REV_ES1_1;
 	}

@@ -23,7 +23,6 @@
 #include <linux/regmap.h>
 #include <linux/smp.h>
 #include <linux/mfd/syscon.h>
-#include <linux/spinlock.h>
 
 #include <asm/cacheflush.h>
 #include <asm/cp15.h>
@@ -58,6 +57,12 @@ static u32 cpu_rst_cfg_reg;
 static u32 hif_cont_reg;
 
 #ifdef CONFIG_HOTPLUG_CPU
+/*
+ * We must quiesce a dying CPU before it can be killed by the boot CPU. Because
+ * one or more cache may be disabled, we must flush to ensure coherency. We
+ * cannot use traditionl completion structures or spinlocks as they rely on
+ * coherency.
+ */
 static DEFINE_PER_CPU_ALIGNED(int, per_cpu_sw_state);
 
 static int per_cpu_sw_state_rd(u32 cpu)
@@ -68,10 +73,9 @@ static int per_cpu_sw_state_rd(u32 cpu)
 
 static void per_cpu_sw_state_wr(u32 cpu, int val)
 {
-	per_cpu(per_cpu_sw_state, cpu) = val;
 	dmb();
+	per_cpu(per_cpu_sw_state, cpu) = val;
 	sync_cache_w(SHIFT_PERCPU_PTR(&per_cpu_sw_state, per_cpu_offset(cpu)));
-	dsb_sev();
 }
 #else
 static inline void per_cpu_sw_state_wr(u32 cpu, int val) { }
@@ -116,15 +120,16 @@ static void cpu_set_boot_addr(u32 cpu, unsigned long boot_addr)
 
 static void brcmstb_cpu_boot(u32 cpu)
 {
-	pr_info("SMP: Booting CPU%d...\n", cpu);
+	/* Mark this CPU as "up" */
+	per_cpu_sw_state_wr(cpu, 1);
 
 	/*
-	 * set the reset vector to point to the secondary_startup
+	 * Set the reset vector to point to the secondary_startup
 	 * routine
 	 */
 	cpu_set_boot_addr(cpu, virt_to_phys(brcmstb_secondary_startup));
 
-	/* unhalt the cpu */
+	/* Unhalt the cpu */
 	cpu_rst_cfg_set(cpu, 0);
 }
 
@@ -136,8 +141,6 @@ static void brcmstb_cpu_power_on(u32 cpu)
 	 */
 	u32 tmp;
 
-	pr_info("SMP: Powering up CPU%d...\n", cpu);
-
 	/* Request zone power up */
 	pwr_ctrl_wr(cpu, ZONE_PWR_UP_REQ_MASK);
 
@@ -145,8 +148,6 @@ static void brcmstb_cpu_power_on(u32 cpu)
 	do {
 		tmp = pwr_ctrl_rd(cpu);
 	} while (!(tmp & ZONE_PWR_ON_STATE_MASK));
-
-	per_cpu_sw_state_wr(cpu, 1);
 }
 
 static int brcmstb_cpu_get_power_state(u32 cpu)
@@ -161,30 +162,19 @@ static void brcmstb_cpu_die(u32 cpu)
 {
 	v7_exit_coherency_flush(all);
 
-	/* Prevent all interrupts from reaching this CPU. */
-	arch_local_irq_disable();
-
-	/*
-	 * Final full barrier to ensure everything before this instruction has
-	 * quiesced.
-	 */
-	isb();
-	dsb();
-
 	per_cpu_sw_state_wr(cpu, 0);
 
 	/* Sit and wait to die */
 	wfi();
 
 	/* We should never get here... */
-	panic("Spurious interrupt on CPU %d received!\n", cpu);
+	while (1)
+		;
 }
 
 static int brcmstb_cpu_kill(u32 cpu)
 {
 	u32 tmp;
-
-	pr_info("SMP: Powering down CPU%d...\n", cpu);
 
 	while (per_cpu_sw_state_rd(cpu))
 		;
@@ -204,8 +194,8 @@ static int brcmstb_cpu_kill(u32 cpu)
 		tmp = pwr_ctrl_rd(cpu);
 	} while (!(tmp & ZONE_PWR_OFF_STATE_MASK));
 
-	/* Settle-time from Broadcom-internal DVT reference code */
-	udelay(7);
+	/* Flush pipeline before resetting CPU */
+	mb();
 
 	/* Assert reset on the CPU */
 	cpu_rst_cfg_set(cpu, 1);
@@ -256,9 +246,7 @@ static int __init setup_hifcpubiuctrl_regs(struct device_node *np)
 	}
 
 cleanup:
-	if (syscon_np)
-		of_node_put(syscon_np);
-
+	of_node_put(syscon_np);
 	return rc;
 }
 
@@ -284,13 +272,11 @@ static int __init setup_hifcont_regs(struct device_node *np)
 		goto cleanup;
 	}
 
-	/* offset is at top of hif_cont_block */
+	/* Offset is at top of hif_cont_block */
 	hif_cont_reg = 0;
 
 cleanup:
-	if (syscon_np)
-		of_node_put(syscon_np);
-
+	of_node_put(syscon_np);
 	return rc;
 }
 
@@ -316,24 +302,11 @@ static void __init brcmstb_cpu_ctrl_setup(unsigned int max_cpus)
 		return;
 }
 
-static DEFINE_SPINLOCK(boot_lock);
-
-static void brcmstb_secondary_init(unsigned int cpu)
-{
-	/*
-	 * Synchronise with the boot thread.
-	 */
-	spin_lock(&boot_lock);
-	spin_unlock(&boot_lock);
-}
-
 static int brcmstb_boot_secondary(unsigned int cpu, struct task_struct *idle)
 {
-	/*
-	 * set synchronisation state between this boot processor
-	 * and the secondary one
-	 */
-	spin_lock(&boot_lock);
+	/* Missing the brcm,brcmstb-smpboot DT node? */
+	if (!cpubiuctrl_block || !hif_cont_block)
+		return -ENODEV;
 
 	/* Bring up power to the core if necessary */
 	if (brcmstb_cpu_get_power_state(cpu) == 0)
@@ -341,18 +314,11 @@ static int brcmstb_boot_secondary(unsigned int cpu, struct task_struct *idle)
 
 	brcmstb_cpu_boot(cpu);
 
-	/*
-	 * now the secondary core is starting up let it run its
-	 * calibrations, then wait for it to finish
-	 */
-	spin_unlock(&boot_lock);
-
 	return 0;
 }
 
 static struct smp_operations brcmstb_smp_ops __initdata = {
 	.smp_prepare_cpus	= brcmstb_cpu_ctrl_setup,
-	.smp_secondary_init	= brcmstb_secondary_init,
 	.smp_boot_secondary	= brcmstb_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU
 	.cpu_kill		= brcmstb_cpu_kill,
