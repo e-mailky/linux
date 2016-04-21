@@ -47,7 +47,7 @@ static DEFINE_SPINLOCK(dbe_lock);
 void *module_alloc(unsigned long size)
 {
 	return __vmalloc_node_range(size, 1, MODULE_START, MODULE_END,
-				GFP_KERNEL, PAGE_KERNEL, NUMA_NO_NODE,
+				GFP_KERNEL, PAGE_KERNEL, 0, NUMA_NO_NODE,
 				__builtin_return_address(0));
 }
 #endif
@@ -197,9 +197,10 @@ int apply_relocate(Elf_Shdr *sechdrs, const char *strtab,
 		   struct module *me)
 {
 	Elf_Mips_Rel *rel = (void *) sechdrs[relsec].sh_addr;
+	int (*handler)(struct module *me, u32 *location, Elf_Addr v);
 	Elf_Sym *sym;
 	u32 *location;
-	unsigned int i;
+	unsigned int i, type;
 	Elf_Addr v;
 	int res;
 
@@ -223,9 +224,21 @@ int apply_relocate(Elf_Shdr *sechdrs, const char *strtab,
 			return -ENOENT;
 		}
 
-		v = sym->st_value;
+		type = ELF_MIPS_R_TYPE(rel[i]);
 
-		res = reloc_handlers_rel[ELF_MIPS_R_TYPE(rel[i])](me, location, v);
+		if (type < ARRAY_SIZE(reloc_handlers_rel))
+			handler = reloc_handlers_rel[type];
+		else
+			handler = NULL;
+
+		if (!handler) {
+			pr_err("%s: Unknown relocation type %u\n",
+			       me->name, type);
+			return -EINVAL;
+		}
+
+		v = sym->st_value;
+		res = handler(me, location, v);
 		if (res)
 			return res;
 	}

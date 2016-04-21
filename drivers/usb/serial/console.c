@@ -14,6 +14,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/console.h>
@@ -144,11 +145,9 @@ static int usb_console_setup(struct console *co, char *options)
 			init_ldsem(&tty->ldisc_sem);
 			INIT_LIST_HEAD(&tty->tty_files);
 			kref_get(&tty->driver->kref);
+			__module_get(tty->driver->owner);
 			tty->ops = &usb_console_fake_tty_ops;
-			if (tty_init_termios(tty)) {
-				retval = -ENOMEM;
-				goto put_tty;
-			}
+			tty_init_termios(tty);
 			tty_port_tty_set(&port->port, tty);
 		}
 
@@ -183,7 +182,6 @@ static int usb_console_setup(struct console *co, char *options)
 
  fail:
 	tty_port_tty_set(&port->port, NULL);
- put_tty:
 	tty_kref_put(tty);
  reset_open_count:
 	port->port.count = 0;

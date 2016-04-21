@@ -233,9 +233,12 @@ static pgprot_t __init init_pgprot(ulong address)
 	if (kdata_huge)
 		return construct_pgprot(PAGE_KERNEL, PAGE_HOME_HASH);
 
-	/* We map the aliased pages of permanent text inaccessible. */
+	/*
+	 * We map the aliased pages of permanent text so we can
+	 * update them if necessary, for ftrace, etc.
+	 */
 	if (address < (ulong) _sinittext - CODE_DELTA)
-		return PAGE_NONE;
+		return construct_pgprot(PAGE_KERNEL, PAGE_HOME_HASH);
 
 	/* We map read-only data non-coherent for performance. */
 	if ((address >= (ulong) __start_rodata &&
@@ -353,15 +356,13 @@ static int __init setup_ktext(char *str)
 
 	/* Neighborhood ktext pages on specified mask */
 	else if (cpulist_parse(str, &ktext_mask) == 0) {
-		char buf[NR_CPUS * 5];
-		cpulist_scnprintf(buf, sizeof(buf), &ktext_mask);
 		if (cpumask_weight(&ktext_mask) > 1) {
 			ktext_small = 1;
-			pr_info("ktext: using caching neighborhood %s with small pages\n",
-				buf);
+			pr_info("ktext: using caching neighborhood %*pbl with small pages\n",
+				cpumask_pr_args(&ktext_mask));
 		} else {
-			pr_info("ktext: caching on cpu %s with one huge page\n",
-				buf);
+			pr_info("ktext: caching on cpu %*pbl with one huge page\n",
+				cpumask_pr_args(&ktext_mask));
 		}
 	}
 
@@ -492,11 +493,9 @@ static void __init kernel_physical_mapping_init(pgd_t *pgd_base)
 		struct cpumask bad;
 		cpumask_andnot(&bad, &ktext_mask, cpu_possible_mask);
 		cpumask_and(&ktext_mask, &ktext_mask, cpu_possible_mask);
-		if (!cpumask_empty(&bad)) {
-			char buf[NR_CPUS * 5];
-			cpulist_scnprintf(buf, sizeof(buf), &bad);
-			pr_info("ktext: not using unavailable cpus %s\n", buf);
-		}
+		if (!cpumask_empty(&bad))
+			pr_info("ktext: not using unavailable cpus %*pbl\n",
+				cpumask_pr_args(&bad));
 		if (cpumask_empty(&ktext_mask)) {
 			pr_warn("ktext: no valid cpus; caching on %d\n",
 				smp_processor_id());
@@ -864,7 +863,7 @@ void __init mem_init(void)
  * memory to the highmem for now.
  */
 #ifndef CONFIG_NEED_MULTIPLE_NODES
-int arch_add_memory(u64 start, u64 size)
+int arch_add_memory(u64 start, u64 size, bool for_device)
 {
 	struct pglist_data *pgdata = &contig_page_data;
 	struct zone *zone = pgdata->node_zones + MAX_NR_ZONES-1;
@@ -897,17 +896,15 @@ void __init pgtable_cache_init(void)
 		panic("pgtable_cache_init(): Cannot create pgd cache");
 }
 
-#ifdef CONFIG_DEBUG_PAGEALLOC
-static long __write_once initfree;
-#else
 static long __write_once initfree = 1;
-#endif
+static bool __write_once set_initfree_done;
 
 /* Select whether to free (1) or mark unusable (0) the __init pages. */
 static int __init set_initfree(char *str)
 {
 	long val;
 	if (kstrtol(str, 0, &val) == 0) {
+		set_initfree_done = true;
 		initfree = val;
 		pr_info("initfree: %s free init pages\n",
 			initfree ? "will" : "won't");
@@ -920,6 +917,11 @@ static void free_init_pages(char *what, unsigned long begin, unsigned long end)
 {
 	unsigned long addr = (unsigned long) begin;
 
+	/* Prefer user request first */
+	if (!set_initfree_done) {
+		if (debug_pagealloc_enabled())
+			initfree = 0;
+	}
 	if (kdata_huge && !initfree) {
 		pr_warn("Warning: ignoring initfree=0: incompatible with kdata=huge\n");
 		initfree = 1;

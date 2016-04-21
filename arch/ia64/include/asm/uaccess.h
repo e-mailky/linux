@@ -169,10 +169,11 @@ do {									\
 	(err) = ia64_getreg(_IA64_REG_R8);				\
 	(val) = ia64_getreg(_IA64_REG_R9);				\
 } while (0)
-# define __put_user_size(val, addr, n, err)							\
-do {												\
-	__st_user("__ex_table", (unsigned long) addr, n, RELOC_TYPE, (unsigned long) (val));	\
-	(err) = ia64_getreg(_IA64_REG_R8);							\
+# define __put_user_size(val, addr, n, err)				\
+do {									\
+	__st_user("__ex_table", (unsigned long) addr, n, RELOC_TYPE,	\
+		  (__force unsigned long) (val));			\
+	(err) = ia64_getreg(_IA64_REG_R8);				\
 } while (0)
 #endif /* !ASM_SUPPORTED */
 
@@ -197,7 +198,7 @@ extern void __get_user_unknown (void);
 		      case 8: __get_user_size(__gu_val, __gu_ptr, 8, __gu_err); break;	\
 		      default: __get_user_unknown(); break;				\
 		}									\
-	(x) = (__typeof__(*(__gu_ptr))) __gu_val;					\
+	(x) = (__force __typeof__(*(__gu_ptr))) __gu_val;				\
 	__gu_err;									\
 })
 
@@ -340,13 +341,11 @@ extern unsigned long __strnlen_user (const char __user *, long);
 	__su_ret;						\
 })
 
-/* Generic code can't deal with the location-relative format that we use for compactness.  */
-#define ARCH_HAS_SORT_EXTABLE
-#define ARCH_HAS_SEARCH_EXTABLE
+#define ARCH_HAS_RELATIVE_EXTABLE
 
 struct exception_table_entry {
-	int addr;	/* location-relative address of insn this fixup is for */
-	int cont;	/* location-relative continuation addr.; if bit 2 is set, r9 is set to 0 */
+	int insn;	/* location-relative address of insn this fixup is for */
+	int fixup;	/* location-relative continuation addr.; if bit 2 is set, r9 is set to 0 */
 };
 
 extern void ia64_handle_exception (struct pt_regs *regs, const struct exception_table_entry *e);

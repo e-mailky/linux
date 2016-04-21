@@ -17,6 +17,7 @@
 #include <linux/bitmap.h>
 #include <linux/fb.h>
 #include <media/v4l2-mediabus.h>
+#include <video/videomode.h>
 
 struct ipu_soc;
 
@@ -32,28 +33,15 @@ enum ipuv3_type {
  * Bitfield of Display Interface signal polarities.
  */
 struct ipu_di_signal_cfg {
-	unsigned datamask_en:1;
-	unsigned interlaced:1;
-	unsigned odd_field_first:1;
-	unsigned clksel_en:1;
-	unsigned clkidle_en:1;
 	unsigned data_pol:1;	/* true = inverted */
 	unsigned clk_pol:1;	/* true = rising edge */
 	unsigned enable_pol:1;
-	unsigned Hsync_pol:1;	/* true = active high */
-	unsigned Vsync_pol:1;
 
-	u16 width;
-	u16 height;
-	u32 pixel_fmt;
-	u16 h_start_width;
-	u16 h_sync_width;
-	u16 h_end_width;
-	u16 v_start_width;
-	u16 v_sync_width;
-	u16 v_end_width;
+	struct videomode mode;
+
+	u32 bus_format;
 	u32 v_to_h_sync;
-	unsigned long pixelclock;
+
 #define IPU_DI_CLKMODE_SYNC	(1 << 0)
 #define IPU_DI_CLKMODE_EXT	(1 << 1)
 	unsigned long clkflags;
@@ -206,8 +194,9 @@ int ipu_cpmem_set_format_rgb(struct ipuv3_channel *ch,
 int ipu_cpmem_set_format_passthrough(struct ipuv3_channel *ch, int width);
 void ipu_cpmem_set_yuv_interleaved(struct ipuv3_channel *ch, u32 pixel_format);
 void ipu_cpmem_set_yuv_planar_full(struct ipuv3_channel *ch,
-				   u32 pixel_format, int stride,
-				   int u_offset, int v_offset);
+				   unsigned int uv_stride,
+				   unsigned int u_offset,
+				   unsigned int v_offset);
 void ipu_cpmem_set_yuv_planar(struct ipuv3_channel *ch,
 			      u32 pixel_format, int stride, int height);
 int ipu_cpmem_set_fmt(struct ipuv3_channel *ch, u32 drm_fourcc);
@@ -236,6 +225,7 @@ void ipu_di_put(struct ipu_di *);
 int ipu_di_disable(struct ipu_di *);
 int ipu_di_enable(struct ipu_di *);
 int ipu_di_get_num(struct ipu_di *);
+int ipu_di_adjust_videomode(struct ipu_di *di, struct videomode *mode);
 int ipu_di_init_sync_panel(struct ipu_di *, struct ipu_di_signal_cfg *sig);
 
 /*
@@ -247,7 +237,7 @@ void ipu_dmfc_disable_channel(struct dmfc_channel *dmfc);
 int ipu_dmfc_alloc_bandwidth(struct dmfc_channel *dmfc,
 		unsigned long bandwidth_mbs, int burstsize);
 void ipu_dmfc_free_bandwidth(struct dmfc_channel *dmfc);
-int ipu_dmfc_init_channel(struct dmfc_channel *dmfc, int width);
+void ipu_dmfc_config_wait4eot(struct dmfc_channel *dmfc, int width);
 struct dmfc_channel *ipu_dmfc_get(struct ipu_soc *ipu, int ipuv3_channel);
 void ipu_dmfc_put(struct dmfc_channel *dmfc);
 
@@ -354,7 +344,6 @@ struct ipu_client_platformdata {
 	int di;
 	int dc;
 	int dp;
-	int dmfc;
 	int dma[2];
 };
 

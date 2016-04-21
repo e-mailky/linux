@@ -39,8 +39,6 @@
 
 #include "mlx4.h"
 
-static const u8 zero_gid[16];	/* automatically initialized to 0 */
-
 int mlx4_get_mgm_entry_size(struct mlx4_dev *dev)
 {
 	return 1 << dev->oper_log_mgm_entry_size;
@@ -752,8 +750,10 @@ static const u8 __promisc_mode[] = {
 	[MLX4_FS_REGULAR]   = 0x0,
 	[MLX4_FS_ALL_DEFAULT] = 0x1,
 	[MLX4_FS_MC_DEFAULT] = 0x3,
-	[MLX4_FS_UC_SNIFFER] = 0x4,
-	[MLX4_FS_MC_SNIFFER] = 0x5,
+	[MLX4_FS_MIRROR_RX_PORT] = 0x4,
+	[MLX4_FS_MIRROR_SX_PORT] = 0x5,
+	[MLX4_FS_UC_SNIFFER] = 0x6,
+	[MLX4_FS_MC_SNIFFER] = 0x7,
 };
 
 int mlx4_map_sw_to_hw_steering_mode(struct mlx4_dev *dev,
@@ -1184,10 +1184,11 @@ out:
 	if (prot == MLX4_PROT_ETH) {
 		/* manage the steering entry for promisc mode */
 		if (new_entry)
-			new_steering_entry(dev, port, steer, index, qp->qpn);
+			err = new_steering_entry(dev, port, steer,
+						 index, qp->qpn);
 		else
-			existing_steering_entry(dev, port, steer,
-						index, qp->qpn);
+			err = existing_steering_entry(dev, port, steer,
+						      index, qp->qpn);
 	}
 	if (err && link && index != -1) {
 		if (index < dev->caps.num_mgms)
@@ -1318,6 +1319,9 @@ out:
 	mutex_unlock(&priv->mcg_table.mutex);
 
 	mlx4_free_cmd_mailbox(dev, mailbox);
+	if (err && dev->persist->state & MLX4_DEVICE_STATE_INTERNAL_ERROR)
+		/* In case device is under an error, return success as a closing command */
+		err = 0;
 	return err;
 }
 
@@ -1347,6 +1351,9 @@ static int mlx4_QP_ATTACH(struct mlx4_dev *dev, struct mlx4_qp *qp,
 		       MLX4_CMD_WRAPPED);
 
 	mlx4_free_cmd_mailbox(dev, mailbox);
+	if (err && !attach &&
+	    dev->persist->state & MLX4_DEVICE_STATE_INTERNAL_ERROR)
+		err = 0;
 	return err;
 }
 

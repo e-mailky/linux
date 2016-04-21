@@ -28,6 +28,7 @@
 #include <drm/drm_crtc.h>
 #include <drm/drm_edid.h>
 #include <drm/i915_drm.h>
+#include <drm/drm_panel.h>
 #include <linux/slab.h>
 #include <video/mipi_display.h>
 #include <asm/intel-mid.h>
@@ -35,7 +36,16 @@
 #include "i915_drv.h"
 #include "intel_drv.h"
 #include "intel_dsi.h"
-#include "intel_dsi_cmd.h"
+
+struct vbt_panel {
+	struct drm_panel panel;
+	struct intel_dsi *intel_dsi;
+};
+
+static inline struct vbt_panel *to_vbt_panel(struct drm_panel *panel)
+{
+	return container_of(panel, struct vbt_panel, panel);
+}
 
 #define MIPI_TRANSFER_MODE_SHIFT	0
 #define MIPI_VIRTUAL_CHANNEL_SHIFT	1
@@ -94,34 +104,59 @@ static struct gpio_table gtable[] = {
 	{ GPIO_NC_11_PCONF0, GPIO_NC_11_PAD, 0}
 };
 
-static u8 *mipi_exec_send_packet(struct intel_dsi *intel_dsi, u8 *data)
+static inline enum port intel_dsi_seq_port_to_port(u8 port)
 {
-	u8 type, byte, mode, vc, port;
+	return port ? PORT_C : PORT_A;
+}
+
+static const u8 *mipi_exec_send_packet(struct intel_dsi *intel_dsi,
+				       const u8 *data)
+{
+	struct mipi_dsi_device *dsi_device;
+	u8 type, flags, seq_port;
 	u16 len;
+	enum port port;
 
-	byte = *data++;
-	mode = (byte >> MIPI_TRANSFER_MODE_SHIFT) & 0x1;
-	vc = (byte >> MIPI_VIRTUAL_CHANNEL_SHIFT) & 0x3;
-	port = (byte >> MIPI_PORT_SHIFT) & 0x3;
-
-	/* LP or HS mode */
-	intel_dsi->hs = mode;
-
-	/* get packet type and increment the pointer */
+	flags = *data++;
 	type = *data++;
 
 	len = *((u16 *) data);
 	data += 2;
 
+	seq_port = (flags >> MIPI_PORT_SHIFT) & 3;
+
+	/* For DSI single link on Port A & C, the seq_port value which is
+	 * parsed from Sequence Block#53 of VBT has been set to 0
+	 * Now, read/write of packets for the DSI single link on Port A and
+	 * Port C will based on the DVO port from VBT block 2.
+	 */
+	if (intel_dsi->ports == (1 << PORT_C))
+		port = PORT_C;
+	else
+		port = intel_dsi_seq_port_to_port(seq_port);
+
+	dsi_device = intel_dsi->dsi_hosts[port]->device;
+	if (!dsi_device) {
+		DRM_DEBUG_KMS("no dsi device for port %c\n", port_name(port));
+		goto out;
+	}
+
+	if ((flags >> MIPI_TRANSFER_MODE_SHIFT) & 1)
+		dsi_device->mode_flags &= ~MIPI_DSI_MODE_LPM;
+	else
+		dsi_device->mode_flags |= MIPI_DSI_MODE_LPM;
+
+	dsi_device->channel = (flags >> MIPI_VIRTUAL_CHANNEL_SHIFT) & 3;
+
 	switch (type) {
 	case MIPI_DSI_GENERIC_SHORT_WRITE_0_PARAM:
-		dsi_vc_generic_write_0(intel_dsi, vc);
+		mipi_dsi_generic_write(dsi_device, NULL, 0);
 		break;
 	case MIPI_DSI_GENERIC_SHORT_WRITE_1_PARAM:
-		dsi_vc_generic_write_1(intel_dsi, vc, *data);
+		mipi_dsi_generic_write(dsi_device, data, 1);
 		break;
 	case MIPI_DSI_GENERIC_SHORT_WRITE_2_PARAM:
-		dsi_vc_generic_write_2(intel_dsi, vc, *data, *(data + 1));
+		mipi_dsi_generic_write(dsi_device, data, 2);
 		break;
 	case MIPI_DSI_GENERIC_READ_REQUEST_0_PARAM:
 	case MIPI_DSI_GENERIC_READ_REQUEST_1_PARAM:
@@ -129,30 +164,31 @@ static u8 *mipi_exec_send_packet(struct intel_dsi *intel_dsi, u8 *data)
 		DRM_DEBUG_DRIVER("Generic Read not yet implemented or used\n");
 		break;
 	case MIPI_DSI_GENERIC_LONG_WRITE:
-		dsi_vc_generic_write(intel_dsi, vc, data, len);
+		mipi_dsi_generic_write(dsi_device, data, len);
 		break;
 	case MIPI_DSI_DCS_SHORT_WRITE:
-		dsi_vc_dcs_write_0(intel_dsi, vc, *data);
+		mipi_dsi_dcs_write_buffer(dsi_device, data, 1);
 		break;
 	case MIPI_DSI_DCS_SHORT_WRITE_PARAM:
-		dsi_vc_dcs_write_1(intel_dsi, vc, *data, *(data + 1));
+		mipi_dsi_dcs_write_buffer(dsi_device, data, 2);
 		break;
 	case MIPI_DSI_DCS_READ:
 		DRM_DEBUG_DRIVER("DCS Read not yet implemented or used\n");
 		break;
 	case MIPI_DSI_DCS_LONG_WRITE:
-		dsi_vc_dcs_write(intel_dsi, vc, data, len);
+		mipi_dsi_dcs_write_buffer(dsi_device, data, len);
 		break;
 	}
 
+out:
 	data += len;
 
 	return data;
 }
 
-static u8 *mipi_exec_delay(struct intel_dsi *intel_dsi, u8 *data)
+static const u8 *mipi_exec_delay(struct intel_dsi *intel_dsi, const u8 *data)
 {
-	u32 delay = *((u32 *) data);
+	u32 delay = *((const u32 *) data);
 
 	usleep_range(delay, delay + 10);
 	data += 4;
@@ -160,7 +196,7 @@ static u8 *mipi_exec_delay(struct intel_dsi *intel_dsi, u8 *data)
 	return data;
 }
 
-static u8 *mipi_exec_gpio(struct intel_dsi *intel_dsi, u8 *data)
+static const u8 *mipi_exec_gpio(struct intel_dsi *intel_dsi, const u8 *data)
 {
 	u8 gpio, action;
 	u16 function, pad;
@@ -168,38 +204,63 @@ static u8 *mipi_exec_gpio(struct intel_dsi *intel_dsi, u8 *data)
 	struct drm_device *dev = intel_dsi->base.base.dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
+	if (dev_priv->vbt.dsi.seq_version >= 3)
+		data++;
+
 	gpio = *data++;
 
 	/* pull up/down */
-	action = *data++;
+	action = *data++ & 1;
+
+	if (gpio >= ARRAY_SIZE(gtable)) {
+		DRM_DEBUG_KMS("unknown gpio %u\n", gpio);
+		goto out;
+	}
+
+	if (!IS_VALLEYVIEW(dev_priv)) {
+		DRM_DEBUG_KMS("GPIO element not supported on this platform\n");
+		goto out;
+	}
+
+	if (dev_priv->vbt.dsi.seq_version >= 3) {
+		DRM_DEBUG_KMS("GPIO element v3 not supported\n");
+		goto out;
+	}
 
 	function = gtable[gpio].function_reg;
 	pad = gtable[gpio].pad_reg;
 
-	mutex_lock(&dev_priv->dpio_lock);
+	mutex_lock(&dev_priv->sb_lock);
 	if (!gtable[gpio].init) {
 		/* program the function */
 		/* FIXME: remove constant below */
-		vlv_gpio_nc_write(dev_priv, function, 0x2000CC00);
+		vlv_iosf_sb_write(dev_priv, IOSF_PORT_GPIO_NC, function,
+				  0x2000CC00);
 		gtable[gpio].init = 1;
 	}
 
 	val = 0x4 | action;
 
 	/* pull up/down */
-	vlv_gpio_nc_write(dev_priv, pad, val);
-	mutex_unlock(&dev_priv->dpio_lock);
+	vlv_iosf_sb_write(dev_priv, IOSF_PORT_GPIO_NC, pad, val);
+	mutex_unlock(&dev_priv->sb_lock);
 
+out:
 	return data;
 }
 
-typedef u8 * (*fn_mipi_elem_exec)(struct intel_dsi *intel_dsi, u8 *data);
+static const u8 *mipi_exec_i2c_skip(struct intel_dsi *intel_dsi, const u8 *data)
+{
+	return data + *(data + 6) + 7;
+}
+
+typedef const u8 * (*fn_mipi_elem_exec)(struct intel_dsi *intel_dsi,
+					const u8 *data);
 static const fn_mipi_elem_exec exec_elem[] = {
-	NULL, /* reserved */
-	mipi_exec_send_packet,
-	mipi_exec_delay,
-	mipi_exec_gpio,
-	NULL, /* status read; later */
+	[MIPI_SEQ_ELEM_SEND_PKT] = mipi_exec_send_packet,
+	[MIPI_SEQ_ELEM_DELAY] = mipi_exec_delay,
+	[MIPI_SEQ_ELEM_GPIO] = mipi_exec_gpio,
+	[MIPI_SEQ_ELEM_I2C] = mipi_exec_i2c_skip,
 };
 
 /*
@@ -209,61 +270,156 @@ static const fn_mipi_elem_exec exec_elem[] = {
  */
 
 static const char * const seq_name[] = {
-	"UNDEFINED",
-	"MIPI_SEQ_ASSERT_RESET",
-	"MIPI_SEQ_INIT_OTP",
-	"MIPI_SEQ_DISPLAY_ON",
-	"MIPI_SEQ_DISPLAY_OFF",
-	"MIPI_SEQ_DEASSERT_RESET"
+	[MIPI_SEQ_ASSERT_RESET] = "MIPI_SEQ_ASSERT_RESET",
+	[MIPI_SEQ_INIT_OTP] = "MIPI_SEQ_INIT_OTP",
+	[MIPI_SEQ_DISPLAY_ON] = "MIPI_SEQ_DISPLAY_ON",
+	[MIPI_SEQ_DISPLAY_OFF]  = "MIPI_SEQ_DISPLAY_OFF",
+	[MIPI_SEQ_DEASSERT_RESET] = "MIPI_SEQ_DEASSERT_RESET",
+	[MIPI_SEQ_BACKLIGHT_ON] = "MIPI_SEQ_BACKLIGHT_ON",
+	[MIPI_SEQ_BACKLIGHT_OFF] = "MIPI_SEQ_BACKLIGHT_OFF",
+	[MIPI_SEQ_TEAR_ON] = "MIPI_SEQ_TEAR_ON",
+	[MIPI_SEQ_TEAR_OFF] = "MIPI_SEQ_TEAR_OFF",
+	[MIPI_SEQ_POWER_ON] = "MIPI_SEQ_POWER_ON",
+	[MIPI_SEQ_POWER_OFF] = "MIPI_SEQ_POWER_OFF",
 };
 
-static void generic_exec_sequence(struct intel_dsi *intel_dsi, char *sequence)
+static const char *sequence_name(enum mipi_seq seq_id)
 {
-	u8 *data = sequence;
-	fn_mipi_elem_exec mipi_elem_exec;
-	int index;
+	if (seq_id < ARRAY_SIZE(seq_name) && seq_name[seq_id])
+		return seq_name[seq_id];
+	else
+		return "(unknown)";
+}
 
-	if (!sequence)
+static void generic_exec_sequence(struct drm_panel *panel, enum mipi_seq seq_id)
+{
+	struct vbt_panel *vbt_panel = to_vbt_panel(panel);
+	struct intel_dsi *intel_dsi = vbt_panel->intel_dsi;
+	struct drm_i915_private *dev_priv = to_i915(intel_dsi->base.base.dev);
+	const u8 *data;
+	fn_mipi_elem_exec mipi_elem_exec;
+
+	if (WARN_ON(seq_id >= ARRAY_SIZE(dev_priv->vbt.dsi.sequence)))
 		return;
 
-	DRM_DEBUG_DRIVER("Starting MIPI sequence - %s\n", seq_name[*data]);
+	data = dev_priv->vbt.dsi.sequence[seq_id];
+	if (!data) {
+		DRM_DEBUG_KMS("MIPI sequence %d - %s not available\n",
+			      seq_id, sequence_name(seq_id));
+		return;
+	}
 
-	/* go to the first element of the sequence */
+	WARN_ON(*data != seq_id);
+
+	DRM_DEBUG_KMS("Starting MIPI sequence %d - %s\n",
+		      seq_id, sequence_name(seq_id));
+
+	/* Skip Sequence Byte. */
 	data++;
 
-	/* parse each byte till we reach end of sequence byte - 0x00 */
+	/* Skip Size of Sequence. */
+	if (dev_priv->vbt.dsi.seq_version >= 3)
+		data += 4;
+
 	while (1) {
-		index = *data;
-		mipi_elem_exec = exec_elem[index];
-		if (!mipi_elem_exec) {
-			DRM_ERROR("Unsupported MIPI element, skipping sequence execution\n");
+		u8 operation_byte = *data++;
+		u8 operation_size = 0;
+
+		if (operation_byte == MIPI_SEQ_ELEM_END)
+			break;
+
+		if (operation_byte < ARRAY_SIZE(exec_elem))
+			mipi_elem_exec = exec_elem[operation_byte];
+		else
+			mipi_elem_exec = NULL;
+
+		/* Size of Operation. */
+		if (dev_priv->vbt.dsi.seq_version >= 3)
+			operation_size = *data++;
+
+		if (mipi_elem_exec) {
+			data = mipi_elem_exec(intel_dsi, data);
+		} else if (operation_size) {
+			/* We have size, skip. */
+			DRM_DEBUG_KMS("Unsupported MIPI operation byte %u\n",
+				      operation_byte);
+			data += operation_size;
+		} else {
+			/* No size, can't skip without parsing. */
+			DRM_ERROR("Unsupported MIPI operation byte %u\n",
+				  operation_byte);
 			return;
 		}
-
-		/* goto element payload */
-		data++;
-
-		/* execute the element specific rotines */
-		data = mipi_elem_exec(intel_dsi, data);
-
-		/*
-		 * After processing the element, data should point to
-		 * next element or end of sequence
-		 * check if have we reached end of sequence
-		 */
-		if (*data == 0x00)
-			break;
 	}
 }
 
-static bool generic_init(struct intel_dsi_device *dsi)
+static int vbt_panel_prepare(struct drm_panel *panel)
 {
-	struct intel_dsi *intel_dsi = container_of(dsi, struct intel_dsi, dev);
+	generic_exec_sequence(panel, MIPI_SEQ_ASSERT_RESET);
+	generic_exec_sequence(panel, MIPI_SEQ_INIT_OTP);
+
+	return 0;
+}
+
+static int vbt_panel_unprepare(struct drm_panel *panel)
+{
+	generic_exec_sequence(panel, MIPI_SEQ_DEASSERT_RESET);
+
+	return 0;
+}
+
+static int vbt_panel_enable(struct drm_panel *panel)
+{
+	generic_exec_sequence(panel, MIPI_SEQ_DISPLAY_ON);
+
+	return 0;
+}
+
+static int vbt_panel_disable(struct drm_panel *panel)
+{
+	generic_exec_sequence(panel, MIPI_SEQ_DISPLAY_OFF);
+
+	return 0;
+}
+
+static int vbt_panel_get_modes(struct drm_panel *panel)
+{
+	struct vbt_panel *vbt_panel = to_vbt_panel(panel);
+	struct intel_dsi *intel_dsi = vbt_panel->intel_dsi;
+	struct drm_device *dev = intel_dsi->base.base.dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_display_mode *mode;
+
+	if (!panel->connector)
+		return 0;
+
+	mode = drm_mode_duplicate(dev, dev_priv->vbt.lfp_lvds_vbt_mode);
+	if (!mode)
+		return 0;
+
+	mode->type |= DRM_MODE_TYPE_PREFERRED;
+
+	drm_mode_probed_add(panel->connector, mode);
+
+	return 1;
+}
+
+static const struct drm_panel_funcs vbt_panel_funcs = {
+	.disable = vbt_panel_disable,
+	.unprepare = vbt_panel_unprepare,
+	.prepare = vbt_panel_prepare,
+	.enable = vbt_panel_enable,
+	.get_modes = vbt_panel_get_modes,
+};
+
+struct drm_panel *vbt_panel_init(struct intel_dsi *intel_dsi, u16 panel_id)
+{
 	struct drm_device *dev = intel_dsi->base.base.dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct mipi_config *mipi_config = dev_priv->vbt.dsi.config;
 	struct mipi_pps_data *pps = dev_priv->vbt.dsi.pps;
 	struct drm_display_mode *mode = dev_priv->vbt.lfp_lvds_vbt_mode;
+	struct vbt_panel *vbt_panel;
 	u32 bits_per_pixel = 24;
 	u32 tlpx_ns, extra_byte_count, bitrate, tlpx_ui;
 	u32 ui_num, ui_den;
@@ -273,6 +429,7 @@ static bool generic_init(struct intel_dsi_device *dsi)
 	u32 lp_to_hs_switch, hs_to_lp_switch;
 	u32 pclk, computed_ddr;
 	u16 burst_mode_ratio;
+	enum port port;
 
 	DRM_DEBUG_KMS("\n");
 
@@ -280,11 +437,10 @@ static bool generic_init(struct intel_dsi_device *dsi)
 	intel_dsi->clock_stop = mipi_config->enable_clk_stop ? 1 : 0;
 	intel_dsi->lane_count = mipi_config->lane_cnt + 1;
 	intel_dsi->pixel_format = mipi_config->videomode_color_format << 7;
+	intel_dsi->dual_link = mipi_config->dual_link;
+	intel_dsi->pixel_overlap = mipi_config->pixel_overlap;
 
-	if (intel_dsi->pixel_format == VID_MODE_FORMAT_RGB666)
-		bits_per_pixel = 18;
-	else if (intel_dsi->pixel_format == VID_MODE_FORMAT_RGB565)
-		bits_per_pixel = 16;
+	bits_per_pixel = dsi_pixel_format_bpp(intel_dsi->pixel_format);
 
 	intel_dsi->operation_mode = mipi_config->is_cmd_mode;
 	intel_dsi->video_mode_format = mipi_config->video_transfer_mode;
@@ -299,6 +455,20 @@ static bool generic_init(struct intel_dsi_device *dsi)
 
 	pclk = mode->clock;
 
+	/* In dual link mode each port needs half of pixel clock */
+	if (intel_dsi->dual_link) {
+		pclk = pclk / 2;
+
+		/* we can enable pixel_overlap if needed by panel. In this
+		 * case we need to increase the pixelclock for extra pixels
+		 */
+		if (intel_dsi->dual_link == DSI_DUAL_LINK_FRONT_BACK) {
+			pclk += DIV_ROUND_UP(mode->vtotal *
+						intel_dsi->pixel_overlap *
+						60, 1000);
+		}
+	}
+
 	/* Burst Mode Ratio
 	 * Target ddr frequency from VBT / non burst ddr freq
 	 * multiply by 100 to preserve remainder
@@ -311,7 +481,7 @@ static bool generic_init(struct intel_dsi_device *dsi)
 			if (mipi_config->target_burst_mode_freq <
 								computed_ddr) {
 				DRM_ERROR("Burst mode freq is less than computed\n");
-				return false;
+				return NULL;
 			}
 
 			burst_mode_ratio = DIV_ROUND_UP(
@@ -321,7 +491,7 @@ static bool generic_init(struct intel_dsi_device *dsi)
 			pclk = DIV_ROUND_UP(pclk * burst_mode_ratio, 100);
 		} else {
 			DRM_ERROR("Burst mode target is not set\n");
-			return false;
+			return NULL;
 		}
 	} else
 		burst_mode_ratio = 100;
@@ -493,6 +663,12 @@ static bool generic_init(struct intel_dsi_device *dsi)
 	DRM_DEBUG_KMS("Clockstop %s\n", intel_dsi->clock_stop ?
 						"disabled" : "enabled");
 	DRM_DEBUG_KMS("Mode %s\n", intel_dsi->operation_mode ? "command" : "video");
+	if (intel_dsi->dual_link == DSI_DUAL_LINK_FRONT_BACK)
+		DRM_DEBUG_KMS("Dual link: DSI_DUAL_LINK_FRONT_BACK\n");
+	else if (intel_dsi->dual_link == DSI_DUAL_LINK_PIXEL_ALT)
+		DRM_DEBUG_KMS("Dual link: DSI_DUAL_LINK_PIXEL_ALT\n");
+	else
+		DRM_DEBUG_KMS("Dual link: NONE\n");
 	DRM_DEBUG_KMS("Pixel Format %d\n", intel_dsi->pixel_format);
 	DRM_DEBUG_KMS("TLPX %d\n", intel_dsi->escape_clk_div);
 	DRM_DEBUG_KMS("LP RX Timeout 0x%x\n", intel_dsi->lp_rx_timeout);
@@ -516,110 +692,20 @@ static bool generic_init(struct intel_dsi_device *dsi)
 	intel_dsi->panel_off_delay = pps->panel_off_delay / 10;
 	intel_dsi->panel_pwr_cycle_delay = pps->panel_power_cycle_delay / 10;
 
-	return true;
+	/* This is cheating a bit with the cleanup. */
+	vbt_panel = devm_kzalloc(dev->dev, sizeof(*vbt_panel), GFP_KERNEL);
+	if (!vbt_panel)
+		return NULL;
+
+	vbt_panel->intel_dsi = intel_dsi;
+	drm_panel_init(&vbt_panel->panel);
+	vbt_panel->panel.funcs = &vbt_panel_funcs;
+	drm_panel_add(&vbt_panel->panel);
+
+	/* a regular driver would get the device in probe */
+	for_each_dsi_port(port, intel_dsi->ports) {
+		mipi_dsi_attach(intel_dsi->dsi_hosts[port]->device);
+	}
+
+	return &vbt_panel->panel;
 }
-
-static int generic_mode_valid(struct intel_dsi_device *dsi,
-		   struct drm_display_mode *mode)
-{
-	return MODE_OK;
-}
-
-static bool generic_mode_fixup(struct intel_dsi_device *dsi,
-		    const struct drm_display_mode *mode,
-		    struct drm_display_mode *adjusted_mode) {
-	return true;
-}
-
-static void generic_panel_reset(struct intel_dsi_device *dsi)
-{
-	struct intel_dsi *intel_dsi = container_of(dsi, struct intel_dsi, dev);
-	struct drm_device *dev = intel_dsi->base.base.dev;
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	char *sequence = dev_priv->vbt.dsi.sequence[MIPI_SEQ_ASSERT_RESET];
-
-	generic_exec_sequence(intel_dsi, sequence);
-}
-
-static void generic_disable_panel_power(struct intel_dsi_device *dsi)
-{
-	struct intel_dsi *intel_dsi = container_of(dsi, struct intel_dsi, dev);
-	struct drm_device *dev = intel_dsi->base.base.dev;
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	char *sequence = dev_priv->vbt.dsi.sequence[MIPI_SEQ_DEASSERT_RESET];
-
-	generic_exec_sequence(intel_dsi, sequence);
-}
-
-static void generic_send_otp_cmds(struct intel_dsi_device *dsi)
-{
-	struct intel_dsi *intel_dsi = container_of(dsi, struct intel_dsi, dev);
-	struct drm_device *dev = intel_dsi->base.base.dev;
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	char *sequence = dev_priv->vbt.dsi.sequence[MIPI_SEQ_INIT_OTP];
-
-	generic_exec_sequence(intel_dsi, sequence);
-}
-
-static void generic_enable(struct intel_dsi_device *dsi)
-{
-	struct intel_dsi *intel_dsi = container_of(dsi, struct intel_dsi, dev);
-	struct drm_device *dev = intel_dsi->base.base.dev;
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	char *sequence = dev_priv->vbt.dsi.sequence[MIPI_SEQ_DISPLAY_ON];
-
-	generic_exec_sequence(intel_dsi, sequence);
-}
-
-static void generic_disable(struct intel_dsi_device *dsi)
-{
-	struct intel_dsi *intel_dsi = container_of(dsi, struct intel_dsi, dev);
-	struct drm_device *dev = intel_dsi->base.base.dev;
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	char *sequence = dev_priv->vbt.dsi.sequence[MIPI_SEQ_DISPLAY_OFF];
-
-	generic_exec_sequence(intel_dsi, sequence);
-}
-
-static enum drm_connector_status generic_detect(struct intel_dsi_device *dsi)
-{
-	return connector_status_connected;
-}
-
-static bool generic_get_hw_state(struct intel_dsi_device *dev)
-{
-	return true;
-}
-
-static struct drm_display_mode *generic_get_modes(struct intel_dsi_device *dsi)
-{
-	struct intel_dsi *intel_dsi = container_of(dsi, struct intel_dsi, dev);
-	struct drm_device *dev = intel_dsi->base.base.dev;
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	dev_priv->vbt.lfp_lvds_vbt_mode->type |= DRM_MODE_TYPE_PREFERRED;
-	return dev_priv->vbt.lfp_lvds_vbt_mode;
-}
-
-static void generic_destroy(struct intel_dsi_device *dsi) { }
-
-/* Callbacks. We might not need them all. */
-struct intel_dsi_dev_ops vbt_generic_dsi_display_ops = {
-	.init = generic_init,
-	.mode_valid = generic_mode_valid,
-	.mode_fixup = generic_mode_fixup,
-	.panel_reset = generic_panel_reset,
-	.disable_panel_power = generic_disable_panel_power,
-	.send_otp_cmds = generic_send_otp_cmds,
-	.enable = generic_enable,
-	.disable = generic_disable,
-	.detect = generic_detect,
-	.get_hw_state = generic_get_hw_state,
-	.get_modes = generic_get_modes,
-	.destroy = generic_destroy,
-};

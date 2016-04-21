@@ -506,6 +506,7 @@ int lirc_dev_fop_close(struct inode *inode, struct file *file)
 {
 	struct irctl *ir = irctls[iminor(inode)];
 	struct cdev *cdev;
+	int ret;
 
 	if (!ir) {
 		printk(KERN_ERR "%s: called with invalid irctl\n", __func__);
@@ -516,7 +517,8 @@ int lirc_dev_fop_close(struct inode *inode, struct file *file)
 
 	dev_dbg(ir->d.dev, LOGHEAD "close called\n", ir->d.name, ir->d.minor);
 
-	WARN_ON(mutex_lock_killable(&lirc_dev_lock));
+	ret = mutex_lock_killable(&lirc_dev_lock);
+	WARN_ON(ret);
 
 	rc_close(ir->d.rdev);
 
@@ -532,7 +534,8 @@ int lirc_dev_fop_close(struct inode *inode, struct file *file)
 		kfree(ir);
 	}
 
-	mutex_unlock(&lirc_dev_lock);
+	if (!ret)
+		mutex_unlock(&lirc_dev_lock);
 
 	return 0;
 }
@@ -553,14 +556,14 @@ unsigned int lirc_dev_fop_poll(struct file *file, poll_table *wait)
 	if (!ir->attached)
 		return POLLERR;
 
-	poll_wait(file, &ir->buf->wait_poll, wait);
+	if (ir->buf) {
+		poll_wait(file, &ir->buf->wait_poll, wait);
 
-	if (ir->buf)
 		if (lirc_buffer_empty(ir->buf))
 			ret = 0;
 		else
 			ret = POLLIN | POLLRDNORM;
-	else
+	} else
 		ret = POLLERR;
 
 	dev_dbg(ir->d.dev, LOGHEAD "poll result = %d\n",

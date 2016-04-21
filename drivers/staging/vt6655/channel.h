@@ -27,6 +27,6 @@
 
 void vnt_init_bands(struct vnt_private *);
 
-bool set_channel(void *pDeviceHandler, unsigned int uConnectionChannel);
+bool set_channel(struct vnt_private *, struct ieee80211_channel *);
 
 #endif /* _CHANNEL_H_ */

@@ -144,13 +144,13 @@ void do_sigreturn32(struct pt_regs *regs)
 	compat_uptr_t fpu_save;
 	compat_uptr_t rwin_save;
 	unsigned int psr;
-	unsigned pc, npc;
+	unsigned int pc, npc;
 	sigset_t set;
 	compat_sigset_t seta;
 	int err, i;
 	
 	/* Always make any pending restarted system calls return -EINTR */
-	current_thread_info()->restart_block.fn = do_no_restart_syscall;
+	current->restart_block.fn = do_no_restart_syscall;
 
 	synchronize_user_stack();
 
@@ -235,7 +235,7 @@ asmlinkage void do_rt_sigreturn32(struct pt_regs *regs)
 	int err, i;
 	
 	/* Always make any pending restarted system calls return -EINTR */
-	current_thread_info()->restart_block.fn = do_no_restart_syscall;
+	current->restart_block.fn = do_no_restart_syscall;
 
 	synchronize_user_stack();
 	regs->u_regs[UREG_FP] &= 0x00000000ffffffffUL;

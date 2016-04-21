@@ -1,6 +1,8 @@
 /*
  * linux/drivers/mmc/host/tmio_mmc_pio.c
  *
+ * Copyright (C) 2016 Sang Engineering, Wolfram Sang
+ * Copyright (C) 2015-16 Renesas Electronics Corporation
  * Copyright (C) 2011 Guennadi Liakhovetski
  * Copyright (C) 2007 Ian Molton
  * Copyright (C) 2004 Ian Molton
@@ -83,6 +85,8 @@ static int tmio_mmc_next_sg(struct tmio_mmc_host *host)
 	return --host->sg_len;
 }
 
+#define CMDREQ_TIMEOUT	5000
+
 #ifdef CONFIG_MMC_DEBUG
 
 #define STATUS_TO_TEXT(a, status, i) \
@@ -157,42 +161,44 @@ static void tmio_mmc_set_clock(struct tmio_mmc_host *host,
 
 	if (new_clock) {
 		for (clock = host->mmc->f_min, clk = 0x80000080;
-			new_clock >= (clock<<1); clk >>= 1)
+		     new_clock >= (clock << 1);
+		     clk >>= 1)
 			clock <<= 1;
 
 		/* 1/1 clock is option */
 		if ((host->pdata->flags & TMIO_MMC_CLK_ACTUAL) &&
-		    ((clk >> 22) & 0x1))
+		   ((clk >> 22) & 0x1))
 			clk |= 0xff;
 	}
 
 	if (host->set_clk_div)
-		host->set_clk_div(host->pdev, (clk>>22) & 1);
+		host->set_clk_div(host->pdev, (clk >> 22) & 1);
 
-	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, clk & 0x1ff);
-	msleep(10);
+	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, ~CLK_CTL_SCLKEN &
+			sd_ctrl_read16(host, CTL_SD_CARD_CLK_CTL));
+	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, clk & CLK_CTL_DIV_MASK);
+	if (!(host->pdata->flags & TMIO_MMC_FAST_CLK_CHG))
+		msleep(10);
 }
 
 static void tmio_mmc_clk_stop(struct tmio_mmc_host *host)
 {
-	/* implicit BUG_ON(!res) */
 	if (host->pdata->flags & TMIO_MMC_HAVE_HIGH_REG) {
 		sd_ctrl_write16(host, CTL_CLK_AND_WAIT_CTL, 0x0000);
 		msleep(10);
 	}
 
-	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, ~0x0100 &
+	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, ~CLK_CTL_SCLKEN &
 		sd_ctrl_read16(host, CTL_SD_CARD_CLK_CTL));
-	msleep(10);
+	msleep(host->pdata->flags & TMIO_MMC_FAST_CLK_CHG ? 5 : 10);
 }
 
 static void tmio_mmc_clk_start(struct tmio_mmc_host *host)
 {
-	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, 0x0100 |
+	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, CLK_CTL_SCLKEN |
 		sd_ctrl_read16(host, CTL_SD_CARD_CLK_CTL));
-	msleep(10);
+	msleep(host->pdata->flags & TMIO_MMC_FAST_CLK_CHG ? 1 : 10);
 
-	/* implicit BUG_ON(!res) */
 	if (host->pdata->flags & TMIO_MMC_HAVE_HIGH_REG) {
 		sd_ctrl_write16(host, CTL_CLK_AND_WAIT_CTL, 0x0100);
 		msleep(10);
@@ -203,7 +209,6 @@ static void tmio_mmc_reset(struct tmio_mmc_host *host)
 {
 	/* FIXME - should we set stop clock reg here */
 	sd_ctrl_write16(host, CTL_RESET_SD, 0x0000);
-	/* implicit BUG_ON(!res) */
 	if (host->pdata->flags & TMIO_MMC_HAVE_HIGH_REG)
 		sd_ctrl_write16(host, CTL_RESET_SDIO, 0x0000);
 	msleep(10);
@@ -230,7 +235,7 @@ static void tmio_mmc_reset_work(struct work_struct *work)
 	 */
 	if (IS_ERR_OR_NULL(mrq)
 	    || time_is_after_jiffies(host->last_req_ts +
-		msecs_to_jiffies(2000))) {
+		msecs_to_jiffies(CMDREQ_TIMEOUT))) {
 		spin_unlock_irqrestore(&host->lock, flags);
 		return;
 	}
@@ -818,7 +823,7 @@ static void tmio_mmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	ret = tmio_mmc_start_command(host, mrq->cmd);
 	if (!ret) {
 		schedule_delayed_work(&host->delayed_reset_work,
-				      msecs_to_jiffies(2000));
+				      msecs_to_jiffies(CMDREQ_TIMEOUT));
 		return;
 	}
 
@@ -835,13 +840,12 @@ fail:
 static int tmio_mmc_clk_update(struct tmio_mmc_host *host)
 {
 	struct mmc_host *mmc = host->mmc;
-	struct tmio_mmc_data *pdata = host->pdata;
 	int ret;
 
-	if (!pdata->clk_enable)
+	if (!host->clk_enable)
 		return -ENOTSUPP;
 
-	ret = pdata->clk_enable(host->pdev, &mmc->f_max);
+	ret = host->clk_enable(host->pdev, &mmc->f_max);
 	if (!ret)
 		mmc->f_min = mmc->f_max / 512;
 
@@ -1005,10 +1009,9 @@ static int tmio_multi_io_quirk(struct mmc_card *card,
 			       unsigned int direction, int blk_size)
 {
 	struct tmio_mmc_host *host = mmc_priv(card->host);
-	struct tmio_mmc_data *pdata = host->pdata;
 
-	if (pdata->multi_io_quirk)
-		return pdata->multi_io_quirk(card, direction, blk_size);
+	if (host->multi_io_quirk)
+		return host->multi_io_quirk(card, direction, blk_size);
 
 	return blk_size;
 }
@@ -1054,12 +1057,35 @@ static void tmio_mmc_of_parse(struct platform_device *pdev,
 		pdata->flags |= TMIO_MMC_WRPROTECT_DISABLE;
 }
 
-int tmio_mmc_host_probe(struct tmio_mmc_host **host,
-				  struct platform_device *pdev,
-				  struct tmio_mmc_data *pdata)
+struct tmio_mmc_host*
+tmio_mmc_host_alloc(struct platform_device *pdev)
 {
-	struct tmio_mmc_host *_host;
+	struct tmio_mmc_host *host;
 	struct mmc_host *mmc;
+
+	mmc = mmc_alloc_host(sizeof(struct tmio_mmc_host), &pdev->dev);
+	if (!mmc)
+		return NULL;
+
+	host = mmc_priv(mmc);
+	host->mmc = mmc;
+	host->pdev = pdev;
+
+	return host;
+}
+EXPORT_SYMBOL(tmio_mmc_host_alloc);
+
+void tmio_mmc_host_free(struct tmio_mmc_host *host)
+{
+	mmc_free_host(host->mmc);
+}
+EXPORT_SYMBOL(tmio_mmc_host_free);
+
+int tmio_mmc_host_probe(struct tmio_mmc_host *_host,
+			struct tmio_mmc_data *pdata)
+{
+	struct platform_device *pdev = _host->pdev;
+	struct mmc_host *mmc = _host->mmc;
 	struct resource *res_ctl;
 	int ret;
 	u32 irq_mask = TMIO_MASK_CMD;
@@ -1067,25 +1093,17 @@ int tmio_mmc_host_probe(struct tmio_mmc_host **host,
 	tmio_mmc_of_parse(pdev, pdata);
 
 	if (!(pdata->flags & TMIO_MMC_HAS_IDLE_WAIT))
-		pdata->write16_hook = NULL;
+		_host->write16_hook = NULL;
 
 	res_ctl = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res_ctl)
 		return -EINVAL;
 
-	mmc = mmc_alloc_host(sizeof(struct tmio_mmc_host), &pdev->dev);
-	if (!mmc)
-		return -ENOMEM;
-
 	ret = mmc_of_parse(mmc);
 	if (ret < 0)
 		goto host_free;
 
-	pdata->dev = &pdev->dev;
-	_host = mmc_priv(mmc);
 	_host->pdata = pdata;
-	_host->mmc = mmc;
-	_host->pdev = pdev;
 	platform_set_drvdata(pdev, mmc);
 
 	_host->set_pwr = pdata->set_pwr;
@@ -1095,7 +1113,8 @@ int tmio_mmc_host_probe(struct tmio_mmc_host **host,
 	if (ret < 0)
 		goto host_free;
 
-	_host->ctl = ioremap(res_ctl->start, resource_size(res_ctl));
+	_host->ctl = devm_ioremap(&pdev->dev,
+				  res_ctl->start, resource_size(res_ctl));
 	if (!_host->ctl) {
 		ret = -ENOMEM;
 		goto host_free;
@@ -1106,7 +1125,7 @@ int tmio_mmc_host_probe(struct tmio_mmc_host **host,
 	mmc->caps2 |= pdata->capabilities2;
 	mmc->max_segs = 32;
 	mmc->max_blk_size = 512;
-	mmc->max_blk_count = (PAGE_CACHE_SIZE / mmc->max_blk_size) *
+	mmc->max_blk_count = (PAGE_SIZE / mmc->max_blk_size) *
 		mmc->max_segs;
 	mmc->max_req_size = mmc->max_blk_size * mmc->max_blk_count;
 	mmc->max_seg_size = mmc->max_req_size;
@@ -1192,12 +1211,9 @@ int tmio_mmc_host_probe(struct tmio_mmc_host **host,
 		mmc_gpiod_request_cd_irq(mmc);
 	}
 
-	*host = _host;
-
 	return 0;
 
 host_free:
-	mmc_free_host(mmc);
 
 	return ret;
 }
@@ -1220,9 +1236,6 @@ void tmio_mmc_host_remove(struct tmio_mmc_host *host)
 
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
-
-	iounmap(host->ctl);
-	mmc_free_host(mmc);
 }
 EXPORT_SYMBOL(tmio_mmc_host_remove);
 
@@ -1237,8 +1250,8 @@ int tmio_mmc_host_runtime_suspend(struct device *dev)
 	if (host->clk_cache)
 		tmio_mmc_clk_stop(host);
 
-	if (host->pdata->clk_disable)
-		host->pdata->clk_disable(host->pdev);
+	if (host->clk_disable)
+		host->clk_disable(host->pdev);
 
 	return 0;
 }
